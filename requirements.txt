@@ -1,25 +1,34 @@
 # CampusPool — hackathon prototype dependencies
+#
 # Pinned so every machine (and future-you) gets the same versions.
+#
+# Minimum Python: 3.10. Verified on 3.10, 3.11 and 3.14 (136 tests passing).
+# Every version below ships prebuilt wheels for Windows on CPython 3.10–3.14,
+# so installing never needs a C++ or Rust toolchain. If pip ever says
+# "Building wheel for ..." on Windows, a pin has drifted behind your Python -
+# do NOT install Visual Studio Build Tools to work around it; bump the pin.
 
 # Web framework
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
+fastapi==0.141.1
+uvicorn==0.52.4
+# (deliberately NOT uvicorn[standard]: that extra pulls Unix-only compiled
+#  packages that do not exist for Windows. --reload still works without it.)
 
 # Data layer
-SQLAlchemy==2.0.36
+SQLAlchemy==2.0.52
 
 # Validation / schemas (Guardrail Layer 1)
-pydantic==2.10.4
+pydantic==2.13.5
 
 # Config
-python-dotenv==1.0.1
-PyYAML==6.0.2
+python-dotenv==1.2.3
+PyYAML==6.0.3
 
 # HTTP client (talks to local Ollama, and Razorpay X REST)
 httpx==0.28.1
 
 # Payments — Razorpay TEST MODE ONLY
-razorpay==1.4.2
+razorpay==2.0.1
 
 # Testing
-pytest==8.3.4
+pytest==9.1.1
