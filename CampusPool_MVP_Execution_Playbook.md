@@ -1,5 +1,7 @@
 # CampusPool MVP — Senior-Engineer Execution Playbook
 
+> **SUPERSEDED.** This document has been consolidated into `CampusPool_Master_Build_Plan.md`, which is now the single operational plan. This file is kept for its rationale and history.
+
 **Companion to:** `CampusPool_Agent_HLD_LLD.md` (architecture), `Building_Your_First_AI_Agent.md` (concepts), `CampusPool_Build_Plan.md` (phase overview).
 **What this document adds:** the other two tell you *what* to build and *why*. This one tells you the literal, numbered, command-level *how* — including the professional habits (git discipline, test-first, definition of done, commit hygiene) that separate "code that happened to work once" from an MVP you can confidently demo and extend. Follow it top to bottom; don't skip Part A even though it has no project code in it — it's the part that makes everything after it go smoothly.
 

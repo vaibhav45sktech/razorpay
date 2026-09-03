@@ -15,9 +15,10 @@ students spend through explicit rules with Razorpay-backed payment execution.
 | `Student_AI_Financial_Ecosystem_PRD (1).pdf` | Product requirements — the highest source of truth |
 | `CampusPool_Agent_HLD_LLD.md` | Architecture: high- and low-level design of the agent + payment flow |
 | `Building_Your_First_AI_Agent.md` | Beginner's conceptual guide to how AI agents actually work |
-| `CampusPool_Build_Plan.md` | Phase-by-phase build plan |
-| `CampusPool_MVP_Execution_Playbook.md` | Literal step-by-step execution process + engineering practices |
-| `CampusPool_Production_Readiness.md` | Production-readiness review: what's built now, what's deferred, and the compliance position |
+| **`CampusPool_Master_Build_Plan.md`** | **START HERE — the single operational plan. Consolidates the two below.** |
+| `CampusPool_Build_Plan.md` | Superseded by the master plan; kept for history |
+| `CampusPool_MVP_Execution_Playbook.md` | Superseded by the master plan; kept for the engineering-practices rationale |
+| `CampusPool_Production_Readiness.md` | Compliance position, deferred-item designs and trigger conditions |
 
 ## Architecture in one paragraph
 

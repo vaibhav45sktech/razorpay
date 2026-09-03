@@ -1,5 +1,7 @@
 # CampusPool — End-to-End Build Plan
 
+> **SUPERSEDED.** This document has been consolidated into `CampusPool_Master_Build_Plan.md`, which is now the single operational plan. This file is kept for its rationale and history.
+
 **Companion to:** `CampusPool_Agent_HLD_LLD.md` (architecture) and the PRD.
 **Purpose:** A literal, phase-by-phase checklist to build this thing, in order, without getting stuck. Each phase ends with something you can actually run and show.
 
