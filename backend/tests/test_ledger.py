@@ -12,7 +12,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backend.models.entities import Bucket, LedgerEvent, LedgerEventType, User
+from backend.models.entities import (
+    BALANCE_BUCKETS,
+    Bucket,
+    LedgerEvent,
+    LedgerEventType,
+    User,
+)
 from backend.services import audit_service, ledger_service
 from backend.services.ledger_service import LedgerError
 
@@ -82,15 +88,84 @@ def test_buckets_are_isolated(db, user) -> None:
     assert ledger_service.get_balance(db, user.id, DISCRETIONARY) == -20000
 
 
-def test_get_balances_includes_every_bucket(db, user) -> None:
-    """Callers must never have to handle a missing key."""
+def test_get_balances_returns_balance_buckets_only(db, user) -> None:
+    """Balance buckets are always present; spend trackers are deliberately not.
+
+    See the Bucket docstring: discretionary's running sum is always negative,
+    so exposing it here would let "-Rs.240" reach a UI as if it were a balance.
+    """
     contribute(db, user, 50000, bucket=EMERGENCY)
     db.commit()
 
     balances = ledger_service.get_balances(db, user.id)
-    assert set(balances) == {b.value for b in Bucket}
+    assert set(balances) == {b.value for b in BALANCE_BUCKETS}
     assert balances[EMERGENCY.value] == 50000
-    assert balances[DISCRETIONARY.value] == 0
+    assert Bucket.REWARDS.value in balances  # present even with no events
+
+
+def test_discretionary_can_never_leak_into_a_balance_display(db, user) -> None:
+    """THE structural guard for the spend-tracking decision.
+
+    A negative discretionary sum must not be reachable through the
+    balance-reading API at all, however much is spent.
+    """
+    spend(db, user, 24000)
+    db.commit()
+
+    balances = ledger_service.get_balances(db, user.id)
+    assert DISCRETIONARY.value not in balances
+    assert all(v >= 0 for v in balances.values()), balances
+
+
+def test_raw_bucket_totals_still_sees_everything_for_reconciliation(db, user) -> None:
+    """Integrity checks must see every event, including spend trackers."""
+    contribute(db, user, 50000, bucket=EMERGENCY)
+    spend(db, user, 24000)
+    db.commit()
+
+    raw = ledger_service.get_raw_bucket_totals(db, user.id)
+    assert set(raw) == {b.value for b in Bucket}
+    assert raw[EMERGENCY.value] == 50000
+    assert raw[DISCRETIONARY.value] == -24000  # negative here is correct
+
+
+# ---------------------------------------------------------------------------
+# Spend-against-limit reporting — how discretionary is meant to be read
+# ---------------------------------------------------------------------------
+
+
+def test_spend_summary_reports_used_against_limit(db, user) -> None:
+    spend(db, user, 24000)
+    db.commit()
+
+    summary = ledger_service.get_month_spend_summary(db, user.id, monthly_limit_paise=100000)
+    assert summary["used_paise"] == 24000
+    assert summary["limit_paise"] == 100000
+    assert summary["remaining_paise"] == 76000
+    assert summary["pct_used"] == 24.0
+
+
+def test_spend_summary_with_no_spending(db, user) -> None:
+    summary = ledger_service.get_month_spend_summary(db, user.id, monthly_limit_paise=100000)
+    assert summary["used_paise"] == 0
+    assert summary["remaining_paise"] == 100000
+    assert summary["pct_used"] == 0.0
+
+
+def test_spend_summary_never_reports_a_negative_allowance(db, user) -> None:
+    """Over-limit shows 0 remaining, never a debt this product does not model."""
+    spend(db, user, 130000)
+    db.commit()
+
+    summary = ledger_service.get_month_spend_summary(db, user.id, monthly_limit_paise=100000)
+    assert summary["used_paise"] == 130000
+    assert summary["remaining_paise"] == 0
+    assert summary["pct_used"] == 130.0
+
+
+def test_spend_summary_handles_zero_limit_without_dividing_by_zero(db, user) -> None:
+    summary = ledger_service.get_month_spend_summary(db, user.id, monthly_limit_paise=0)
+    assert summary["pct_used"] == 0.0
 
 
 def test_balances_are_per_user(db) -> None:

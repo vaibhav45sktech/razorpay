@@ -108,11 +108,42 @@ class GoalStatus(str, enum.Enum):
 
 
 class Bucket(str, enum.Enum):
-    """Where money sits. EMERGENCY_SAVINGS is protected from agent spending."""
+    """Where money sits, or how it flows.
+
+    DESIGN DECISION - two kinds of bucket, and it matters:
+
+    EMERGENCY_SAVINGS and REWARDS are true BALANCES. Money accumulates in them
+    and a positive number is meaningful to a user: "you have Rs.1,500 saved".
+
+    DISCRETIONARY is a SPEND TRACKER, not a balance. Nothing credits it; only
+    purchases debit it, so its running sum is always negative and grows more
+    negative over time. That is correct and intentional: the PRD governs
+    discretionary spending by a MONTHLY LIMIT (s4.3), not by a stored spending
+    balance, so what is meaningful is "Rs.240 of Rs.1,000 used this month" -
+    never "your discretionary balance is -Rs.240", which reads as a debt and is
+    not a claim this product makes.
+
+    This is enforced structurally rather than by convention: ledger_service
+    exposes discretionary only through month_spend()/get_month_spend_summary(),
+    and get_balances() returns BALANCE_BUCKETS only, so a negative spend
+    tracker cannot leak into a balance display. get_raw_bucket_totals() exists
+    for reconciliation and is named to signal it is not for display.
+
+    Alternatives considered and rejected: adding a monthly "allowance" credit
+    to make the number positive would invent a funding flow the PRD does not
+    describe; dropping the bucket would lose per-category spend tracking.
+    """
 
     EMERGENCY_SAVINGS = "emergency_savings"
     DISCRETIONARY = "discretionary"
     REWARDS = "rewards"
+
+
+#: Buckets whose running sum is a real, user-facing balance.
+BALANCE_BUCKETS: tuple[Bucket, ...] = (Bucket.EMERGENCY_SAVINGS, Bucket.REWARDS)
+
+#: Buckets that only ever accumulate outflow, reported as spend-against-limit.
+SPEND_TRACKING_BUCKETS: tuple[Bucket, ...] = (Bucket.DISCRETIONARY,)
 
 
 class LedgerEventType(str, enum.Enum):
