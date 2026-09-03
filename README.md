@@ -76,6 +76,18 @@ OneDrive holds file handles on the repo. Delete `.git\index.lock` and retry.
 Moving the project outside OneDrive (e.g. `C:\dev\campuspool`) removes this
 permanently.
 
+## API (so far)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/health` | Liveness + non-secret config |
+| GET | `/api/state/{user_id}` | Everything the UI renders and the agent is shown |
+| GET | `/api/intents/{id}` | One intent, with its frozen policy decision |
+| POST | `/api/intents/{id}/approve` · `/deny` | Structured user approval (never via chat) |
+| POST | `/debug/seed` · `/debug/intents` · `/debug/intents/{id}/fake-settle` · `/fake-fail` · `/reverse` | **DEBUG=true only** — 404 otherwise. Fake provider until Phase 5. |
+
+Interactive docs at http://localhost:8000/docs once running.
+
 ## Tests
 
 ```bash
@@ -89,8 +101,8 @@ pytest backend/tests -v
 | 0 — Repo, environment, tool-calling proof | **done** — app boots, config guard tested (7 tests) |
 | 1 — Data layer | **done** — models, session layer, tamper-evident audit trail, append-only ledger, idempotent synthetic seed (69 tests) |
 | 2 — Policy engine | **done** — deterministic ALLOW/DENY/REQUIRE_APPROVAL, velocity controls, 61 table-driven tests |
-| 3 — Money state machine (fake executor) | next |
-| 4 — The Financial Agent | not started |
+| 3 — Money state machine (fake executor) | **done** — transition table, idempotent create, approval, settlement, reversal, pool invariant, HTTP flow (60 tests) |
+| 4 — The Financial Agent | next |
 | 5 — Razorpay Test Mode | not started |
 | 6 — Frontend | not started |
 | 7 — Benchmark + hardening | not started |

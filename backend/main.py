@@ -1,7 +1,6 @@
 """FastAPI application entrypoint for the CampusPool prototype.
 
-Phase 0: health check only. Routes get added phase by phase, per the
-Execution Playbook. Keeping this file thin is deliberate — it wires things
+Routers are added phase by phase per the master build plan. Keeping this file thin is deliberate — it wires things
 together and owns nothing.
 """
 
@@ -14,6 +13,10 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 
 from backend import config
+from backend.api import debug as debug_routes
+from backend.api import intents as intent_routes
+from backend.api import state as state_routes
+from backend.models import db as database
 
 # Playbook A.6: real logging from day one, not "when something breaks".
 logging.basicConfig(
@@ -31,8 +34,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     @app.on_event("startup") decorator.
     """
     logger.info("CampusPool starting with config: %s", config.summary())
+    database.create_all()
     if not config.RAZORPAY_ENABLED:
         logger.info("Razorpay not configured yet - expected before Phase 5.")
+    if config.DEBUG:
+        logger.warning("DEBUG=true: /debug/* routes (fake payment settler) are ENABLED.")
     yield
     logger.info("CampusPool shutting down.")
 
@@ -47,6 +53,11 @@ app = FastAPI(
     version="0.0.0",
     lifespan=lifespan,
 )
+
+
+app.include_router(state_routes.router)
+app.include_router(intent_routes.router)
+app.include_router(debug_routes.router)
 
 
 @app.get("/health")
