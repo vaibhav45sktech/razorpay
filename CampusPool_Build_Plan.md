@@ -177,6 +177,32 @@ Deliberately last, and deliberately thin — the frontend's job is to render sta
 
 ---
 
+---
+
+## Phase 8 — Hardening (added after the production-readiness review)
+
+Goal: close the gaps that are cheap now and genuinely reduce risk. Full rationale, triage and the deliberately-deferred items are in `CampusPool_Production_Readiness.md`.
+
+1. **Rate limiting** — `slowapi` per-IP on everything, a much tighter per-user limit on `/api/chat` (each call costs real compute), stricter still on `/api/intents/{id}/execute`. Webhook endpoint exempt from IP limits but protected by signature validation.
+2. **Velocity controls in the policy engine** — max intents per user per hour/day, max concurrent pending intents. These are policy rules, so they get the same table-driven tests as spending limits.
+3. **Structured JSON logging with `request_id`** propagated through the agent turn, every tool call and the resulting webhook — one identifier reconstructs a whole transaction. This is most of the value of distributed tracing at a fraction of the cost, and the right stopping point for a single service.
+4. **`/metrics` (prometheus-client)** — counters for tool calls by name/outcome, policy decisions by verdict, intent transitions by state, webhook events by type/validity; histograms for turn duration and LLM step latency.
+5. **Deep health checks** — `/health` stays shallow for liveness; add `/health/ready` reporting DB, Ollama and Razorpay config status.
+6. **CI (GitHub Actions)** — pytest, `ruff`, `mypy`, `pip-audit`, and a build-failing check for `rzp_live` or a committed `.env`. Plus `gitleaks` as a pre-commit hook.
+7. **Backup + rehearsed restore** — `scripts/backup_db.py` using SQLite's `.backup` API (safe on a live DB, unlike copying the file). Rehearse the restore; an unrehearsed restore is a hope, not a plan.
+8. **SQLite tuning** — `PRAGMA journal_mode=WAL` (readers stop blocking the writer, the real concurrency limit here) and `busy_timeout`.
+9. **Chaos tests, automated** — webhook delayed past the reconciliation window, delivered twice, delivered out of order, for an unknown order; Razorpay 5xx during `create_order`; Razorpay timing out *after* the order was actually created (the classic payments bug — idempotency plus reconciliation should cover it, but it must be tested); Ollama killed mid-turn; DB locked mid-transaction.
+10. **Load tests** — `k6`/`locust`, split read endpoints from `/api/chat` (the latter is bound by one local model and will not scale; report that honestly). Target concurrency: `# TODO: confirm with product owner`.
+11. **Ledger reversal path**, tested — `REVERSAL` exists in the schema but nothing uses it yet; it's the clawback/dispute path.
+12. **Pool invariant test** — assert no code path can ever produce a pooled balance. This turns the BUDS Act constraint (see Production Readiness §2) into a failing build if anyone violates it.
+13. **Retention + purpose fields** on personal-data tables — cheap now, painful to retrofit, and it's what makes DPDP compliance configuration rather than a rewrite before May 2027.
+14. **Model digest logging** — record what `ollama show` reports at startup, so a silently swapped or corrupted model appears in logs rather than as mysterious behaviour.
+15. **Degradation matrix**, documented and tested — for each dependency, what the app still does when it's down.
+
+**Already folded into earlier phases:** the audit hash chain (Phase 1, done); LLM timeouts, wall-clock turn budget, degraded mode, model pre-warm (Phase 4); CSP + Subresource Integrity on the checkout page and the automated daily reconciliation job (Phase 5).
+
+Phase 8 is roughly **1.5–2 days**. If time tightens, the priority order is: audit hash chain and pool invariant (the compliance story) → rate limiting and velocity controls (the abuse story) → chaos tests (the reliability story) → metrics and CI (the operational story) → load tests last, since the honest answer there is already known.
+
 ## Suggested day-by-day if you have ~7–8 working days
 
 | Day | Phases |

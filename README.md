@@ -17,6 +17,7 @@ students spend through explicit rules with Razorpay-backed payment execution.
 | `Building_Your_First_AI_Agent.md` | Beginner's conceptual guide to how AI agents actually work |
 | `CampusPool_Build_Plan.md` | Phase-by-phase build plan |
 | `CampusPool_MVP_Execution_Playbook.md` | Literal step-by-step execution process + engineering practices |
+| `CampusPool_Production_Readiness.md` | Production-readiness review: what's built now, what's deferred, and the compliance position |
 
 ## Architecture in one paragraph
 
@@ -62,10 +63,11 @@ pytest backend/tests -v
 | Phase | Status |
 |---|---|
 | 0 — Repo, environment, tool-calling proof | **done** — app boots, config guard tested (7 tests) |
-| 1 — Data layer | in progress |
+| 1 — Data layer | in progress — models, session layer, tamper-evident audit trail done (31 tests) |
 | 2 — Policy engine | not started |
 | 3 — Money state machine (fake executor) | not started |
 | 4 — The Financial Agent | not started |
 | 5 — Razorpay Test Mode | not started |
 | 6 — Frontend | not started |
 | 7 — Benchmark + hardening | not started |
+| 8 — Hardening (rate limits, metrics, chaos + load tests, CI) | not started |

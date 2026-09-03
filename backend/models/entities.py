@@ -529,10 +529,33 @@ class AuditEvent(Base):
     policy_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     provider_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # ---- Tamper-evidence: hash chain ----
+    #
+    # "Append-only" as a code convention protects against accidents, not against
+    # anyone with database access. A hash chain makes tampering DETECTABLE:
+    # each entry commits to its own content and to the previous entry's hash,
+    # so altering or deleting any historical row breaks every hash after it.
+    #
+    # This does not make the log immutable (nothing in a single database can),
+    # but it means forgery cannot be silent - audit_service.verify_chain()
+    # reports the exact index where the chain first breaks.
+    #
+    # seq is a monotonic counter giving the chain a defined order that does not
+    # depend on timestamp collisions or string-sorted ids.
+    #
+    # Assigned by audit_service, NOT by the database: SQLite only autoincrements
+    # an INTEGER PRIMARY KEY, and our primary key is a prefixed string. The
+    # service is the sole writer and already reads the last entry to obtain
+    # prev_hash, so it has the previous seq for free. UNIQUE still guarantees
+    # the database rejects a duplicate if that logic ever regresses.
+    seq: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    entry_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     def __repr__(self) -> str:
-        return f"<AuditEvent {self.id} {self.actor.value} {self.action!r}>"
+        return f"<AuditEvent seq={self.seq} {self.actor.value} {self.action!r}>"
 
 
 class ExceptionRecord(Base):

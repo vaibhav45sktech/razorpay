@@ -285,6 +285,21 @@ If you haven't done the hands-on exercises in `Building_Your_First_AI_Agent.md` 
 
 ---
 
+---
+
+### Phase 8 — Hardening
+
+**Branch:** `phase-8-hardening`
+
+Added after the production-readiness review. The 15 numbered steps are in `CampusPool_Build_Plan.md` (Phase 8); the reasoning, the triage of what was deliberately deferred, and the compliance corrections are in `CampusPool_Production_Readiness.md`.
+
+Same Definition of Done as every other phase (A.2), with two additions specific to this phase:
+
+- [ ] `verify_chain()` demonstrated live: tamper with a row via raw SQL and watch the system name the forged entry
+- [ ] The degradation matrix is not just written but *tested* — kill each dependency in turn and confirm the documented behaviour is what actually happens
+
+**Commit & tag:** `git tag v0.8-hardening`.
+
 ## Part C — The one-page version, pinned to your desk
 
 1. Branch per phase. Small commits. Never commit broken code to `main`.
