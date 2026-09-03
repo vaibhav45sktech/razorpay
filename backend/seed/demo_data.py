@@ -388,15 +388,30 @@ def main() -> None:
         with database.session_scope() as session:
             from backend.services import audit_service
 
-            balances = ledger_service.get_balances(
-                session,
-                session.execute(select(User).where(User.name == PRIMARY_DEMO_USER)).scalar_one().id,
+            user_id = (
+                session.execute(select(User).where(User.name == PRIMARY_DEMO_USER))
+                .scalar_one()
+                .id
             )
             print("\nSeeded. Demo state for", PRIMARY_DEMO_USER)
-            for bucket, amount in balances.items():
+
+            # Balance buckets read as balances...
+            for bucket, amount in ledger_service.get_balances(session, user_id).items():
                 print(f"  {bucket:<20} Rs.{amount / 100:>10,.2f}")
+
+            # ...and discretionary reads as spend-against-limit, never as a
+            # negative balance. See the Bucket docstring in models/entities.py.
+            spend = ledger_service.get_month_spend_summary(
+                session, user_id, monthly_limit_paise=MONTHLY_LIMIT_PAISE
+            )
+            print(
+                f"  {'spent this month':<20} Rs.{spend['used_paise'] / 100:>10,.2f}"
+                f"  of Rs.{spend['limit_paise'] / 100:,.2f}"
+                f"  ({spend['pct_used']}% used)"
+            )
+
             chain = audit_service.verify_chain(session)
-            print(f"  audit chain          {'verified' if chain.ok else 'BROKEN'} "
+            print(f"  {'audit chain':<20} {'verified' if chain.ok else 'BROKEN':>13} "
                   f"({chain.checked} entries)")
             print("\nALL DATA IS SYNTHETIC / DEMO.")
 

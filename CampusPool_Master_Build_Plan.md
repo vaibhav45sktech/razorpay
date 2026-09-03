@@ -580,6 +580,35 @@ Values left as `# TODO: confirm with product owner` in code: `per_tx_limit_paise
 
 ---
 
+# Part D2 — Resolved decisions (decision log)
+
+Decisions that came up during the build and have been settled. Recorded so the
+reasoning survives, and so nobody relitigates them by accident.
+
+### D2.1 — Discretionary is a spend tracker, not a balance *(resolved 2026-09-03, Phase 1)*
+
+**Question that arose:** seeding produced `discretionary: -₹240`. Purchases debit the bucket and nothing ever credits it, so its running sum is permanently negative. Displayed as a balance, that reads as a debt the product does not model.
+
+**Options considered:**
+
+1. **Treat discretionary as spend-tracking** — report "₹240 of ₹1,000 used this month", never a bucket balance.
+2. Add a monthly discretionary allowance credit so the number goes positive.
+3. Drop the discretionary bucket entirely.
+
+**Chosen: option 1.** Option 2 would invent a funding flow the PRD does not describe — the PRD governs discretionary spending by a *monthly limit* (§4.3), not by a stored spending balance — and inventing product rules is exactly what the coding-agent instructions forbid. Option 3 would lose per-category spend tracking.
+
+**How it is enforced** (structurally, not by convention — consistent with how the ledger's append-only rule is enforced):
+
+- `Bucket` now declares `BALANCE_BUCKETS` (emergency savings, rewards) and `SPEND_TRACKING_BUCKETS` (discretionary), with the reasoning in its docstring.
+- `ledger_service.get_balances()` returns **balance buckets only** — discretionary is not reachable through the balance-reading API at all, so a negative spend tracker cannot leak into a UI.
+- `get_month_spend_summary(monthly_limit_paise=...)` is the sanctioned way to read discretionary. It returns `used / limit / remaining / pct_used`, floors `remaining` at zero, and takes the limit as a parameter so the ledger stays decoupled from the policy layer that owns limits.
+- `get_raw_bucket_totals()` still sees every bucket for reconciliation and ledger-integrity checks (Phase 5 step 8), and is named to signal it is not for display.
+- Tests pin all of it, including `test_discretionary_can_never_leak_into_a_balance_display`.
+
+**Consequences for later phases:** Phase 4's `get_wallet_or_ledger` tool returns balances plus a spend summary, never a discretionary balance. Phase 6's state panel shows a progress-style "used of limit" element for spending, and balance figures only for savings and rewards.
+
+---
+
 # Part E — Pin this next to your screen
 
 1. Branch per phase. Small commits. Never break `main`.

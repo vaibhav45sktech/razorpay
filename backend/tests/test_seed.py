@@ -155,9 +155,14 @@ def test_established_user_has_savings_and_headroom(db) -> None:
     balances = ledger_service.get_balances(db, aarav.id)
 
     assert balances[Bucket.EMERGENCY_SAVINGS.value] == 150_000  # Rs.1,500 from 3 x Rs.500
-    spent = ledger_service.month_spend(db, aarav.id, Bucket.DISCRETIONARY)
-    assert spent == 24_000                                       # Rs.240
-    assert spent < 100_000                                       # headroom under the limit
+
+    # Discretionary is read as spend-against-limit, never as a balance.
+    summary = ledger_service.get_month_spend_summary(
+        db, aarav.id, monthly_limit_paise=demo_data.MONTHLY_LIMIT_PAISE
+    )
+    assert summary["used_paise"] == 24_000        # Rs.240
+    assert summary["remaining_paise"] == 76_000   # headroom for the demo
+    assert summary["pct_used"] == 24.0
 
 
 def test_new_user_starts_empty(db) -> None:
@@ -167,6 +172,7 @@ def test_new_user_starts_empty(db) -> None:
 
     diya = db.query(User).filter(User.name.like("Diya%")).one()
     assert ledger_service.get_balance(db, diya.id, Bucket.EMERGENCY_SAVINGS) == 0
+    assert all(v == 0 for v in ledger_service.get_balances(db, diya.id).values())
     assert ledger_service.get_event_count(db, diya.id) == 0
     # ...but she still has rules and a goal, so the agent can talk to her.
     assert db.query(SpendPolicy).filter_by(user_id=diya.id).one() is not None

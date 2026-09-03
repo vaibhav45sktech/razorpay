@@ -32,6 +32,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.models.entities import (
+    BALANCE_BUCKETS,
     AuditActor,
     Bucket,
     LedgerEvent,
@@ -216,23 +217,46 @@ def get_balance(session: Session, user_id: str, bucket: Bucket) -> int:
     )
 
 
-def get_balances(session: Session, user_id: str) -> dict[str, int]:
-    """All bucket balances in one query, keyed by bucket value.
-
-    Every bucket is present even with no events, so callers never have to
-    handle a missing key. The agent's observe() step reads this every turn.
-    """
+def _bucket_totals(session: Session, user_id: str) -> dict[str, int]:
+    """Raw signed sum per bucket, for internal composition."""
     rows = session.execute(
         select(LedgerEvent.bucket, func.coalesce(func.sum(LedgerEvent.amount_paise), 0))
         .where(LedgerEvent.user_id == user_id)
         .group_by(LedgerEvent.bucket)
     ).all()
 
-    balances = {bucket.value: 0 for bucket in Bucket}
+    totals = {bucket.value: 0 for bucket in Bucket}
     for bucket, total in rows:
         key = bucket.value if hasattr(bucket, "value") else str(bucket)
-        balances[key] = int(total)
-    return balances
+        totals[key] = int(total)
+    return totals
+
+
+def get_balances(session: Session, user_id: str) -> dict[str, int]:
+    """User-facing balances, keyed by bucket value.
+
+    Returns BALANCE_BUCKETS only - emergency savings and rewards. Discretionary
+    is deliberately absent: it is a spend tracker whose running sum is always
+    negative, and surfacing it here would let "-Rs.240" reach a UI as though it
+    were a balance the user owes. Read discretionary through
+    get_month_spend_summary() instead. See the Bucket docstring for the full
+    reasoning.
+
+    Every balance bucket is present even with no events, so callers never have
+    to handle a missing key. The agent's observe() step reads this each turn.
+    """
+    totals = _bucket_totals(session, user_id)
+    return {bucket.value: totals[bucket.value] for bucket in BALANCE_BUCKETS}
+
+
+def get_raw_bucket_totals(session: Session, user_id: str) -> dict[str, int]:
+    """Signed totals for EVERY bucket, including spend trackers.
+
+    NOT FOR DISPLAY. This exists for reconciliation and ledger-integrity checks
+    (master build plan Phase 5 step 8), which must see every event. Anything
+    user-facing should call get_balances() or get_month_spend_summary().
+    """
+    return _bucket_totals(session, user_id)
 
 
 def _current_month_start() -> datetime:
@@ -257,6 +281,34 @@ def month_spend(session: Session, user_id: str, bucket: Bucket) -> int:
         )
     ).scalar_one()
     return abs(int(total))
+
+
+def get_month_spend_summary(
+    session: Session,
+    user_id: str,
+    *,
+    monthly_limit_paise: int,
+    bucket: Bucket = Bucket.DISCRETIONARY,
+) -> dict[str, int | float]:
+    """Spending this month expressed against a limit - the user-facing shape.
+
+    This is how a spend tracker is meant to be read: "Rs.240 of Rs.1,000 used",
+    not a negative balance. The limit is passed IN rather than looked up, so the
+    ledger stays decoupled from the policy layer that owns limits.
+
+    remaining_paise is floored at zero: a user who somehow exceeded the limit is
+    shown "0 remaining", never a negative allowance, which would invite a UI to
+    render a debt this product does not model.
+    """
+    used = month_spend(session, user_id, bucket)
+    remaining = max(0, monthly_limit_paise - used)
+    pct = (used / monthly_limit_paise * 100) if monthly_limit_paise > 0 else 0.0
+    return {
+        "used_paise": used,
+        "limit_paise": monthly_limit_paise,
+        "remaining_paise": remaining,
+        "pct_used": round(pct, 1),
+    }
 
 
 def get_recent_events(session: Session, user_id: str, limit: int = 20) -> list[LedgerEvent]:
