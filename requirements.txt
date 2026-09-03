@@ -1,0 +1,25 @@
+# CampusPool — hackathon prototype dependencies
+# Pinned so every machine (and future-you) gets the same versions.
+
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Data layer
+SQLAlchemy==2.0.36
+
+# Validation / schemas (Guardrail Layer 1)
+pydantic==2.10.4
+
+# Config
+python-dotenv==1.0.1
+PyYAML==6.0.2
+
+# HTTP client (talks to local Ollama, and Razorpay X REST)
+httpx==0.28.1
+
+# Payments — Razorpay TEST MODE ONLY
+razorpay==1.4.2
+
+# Testing
+pytest==8.3.4
