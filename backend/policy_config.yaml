@@ -1,0 +1,57 @@
+# CampusPool policy configuration — source of truth #3 (PRD s8.1).
+#
+# The PRD outranks this file; this file outranks any code default; LLM output
+# is never a source of truth. Every number here traces to a PRD section or is
+# explicitly marked TODO. Nothing in this file is a guess presented as policy.
+#
+# These are PRODUCT defaults. Per-user rules the student has chosen (their own
+# monthly limit, approval threshold, protected buckets, pause state) live in the
+# spend_policies table and are read by the policy engine alongside this file.
+#
+# All amounts are integer paise. Rs.500 == 50000.
+
+version: 1
+currency: INR
+
+contribution:
+  # PRD s1: "Rs.100-Rs.500 recurring contributions"
+  min_paise: 10000     # Rs.100
+  max_paise: 50000     # Rs.500
+
+purchase:
+  # PRD s4.3 worked example. Per-user values in spend_policies override these.
+  default_monthly_limit_paise: 100000       # Rs.1,000/month
+  default_approval_threshold_paise: 50000   # purchases ABOVE Rs.500 need approval
+  # Boundary rule for the threshold: amount > threshold requires approval;
+  # amount == threshold does not. Chosen to match the PRD's wording "above".
+  approval_is_strictly_above: true
+  # PRD does not define a per-transaction cap.
+  # TODO: confirm per_tx_limit_paise with product owner.
+  default_per_tx_limit_paise: null
+
+protected_buckets:
+  # PRD s4.3: "Never touch emergency savings" -> block attempt.
+  - emergency_savings
+
+pause:
+  # PRD s4.3: user rule "Pause spending" -> agent behaviour "Stop new agentic
+  # PURCHASE actions". Read literally: pausing spending blocks purchases, and
+  # does not block a student from continuing to save.
+  # TODO: confirm with product owner whether pause should also block
+  #       contributions and payouts.
+  blocks_actions:
+    - PURCHASE
+
+pool:
+  # PRD s4.1 demo example: 10 students x Rs.500 -> virtual cycle amount Rs.5,000.
+  demo_cycle_size: 10
+  contribution_paise: 50000
+
+velocity:
+  # Deterministic abuse controls (CampusPool_Production_Readiness.md s3.3).
+  # These are conservative DEMO defaults chosen so a normal user never hits
+  # them while a script hammering the API does.
+  # TODO: confirm all three values with product owner.
+  max_intents_per_hour: 10
+  max_intents_per_day: 30
+  max_pending_intents: 3

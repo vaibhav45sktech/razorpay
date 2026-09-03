@@ -65,8 +65,8 @@ pytest backend/tests -v
 |---|---|
 | 0 — Repo, environment, tool-calling proof | **done** — app boots, config guard tested (7 tests) |
 | 1 — Data layer | **done** — models, session layer, tamper-evident audit trail, append-only ledger, idempotent synthetic seed (69 tests) |
-| 2 — Policy engine | next |
-| 3 — Money state machine (fake executor) | not started |
+| 2 — Policy engine | **done** — deterministic ALLOW/DENY/REQUIRE_APPROVAL, velocity controls, 61 table-driven tests |
+| 3 — Money state machine (fake executor) | next |
 | 4 — The Financial Agent | not started |
 | 5 — Razorpay Test Mode | not started |
 | 6 — Frontend | not started |
