@@ -15,10 +15,37 @@ Three conventions here are load-bearing across the whole codebase:
    for a given user + bucket. A stored balance can silently drift out of sync
    with the events that produced it; a derived one cannot.
 
-3. IDs ARE PREFIXED STRINGS ("usr_a1b2...", "int_c3d4..."). Slightly more
+3. IDS ARE PREFIXED STRINGS ("usr_a1b2...", "int_c3d4..."). Slightly more
    verbose than integers, but it means an ID in a log line, an audit record or
    a Razorpay notes field tells you what kind of thing it refers to, and an ID
    from the wrong table can never be silently accepted.
+
+DATA CLASSIFICATION (for DPDP Act 2023 readiness)
+-------------------------------------------------
+This prototype processes ONLY synthetic data, so India's DPDP Act does not
+currently bite - it governs personal data of identifiable individuals. But the
+Act's substantive obligations commence 13 May 2027, and the classification
+below is what makes that a configuration exercise rather than a rewrite. See
+CampusPool_Production_Readiness.md s1.2 for the phase-in timeline.
+
+    SYNTHETIC-ONLY (no personal data even in production)
+        Offer, PoolCycle          - catalogue and rule definitions
+
+    WOULD-BE-PERSONAL-DATA (holds identifiable info once real users exist)
+        User                      - name, and later contact details
+        Approval                  - links a person to an authorisation decision
+        PoolAllocation            - links a person to a benefit
+
+    FINANCIAL-RECORD (retention likely mandated, may CONFLICT with erasure)
+        LedgerEvent, ActionIntent - the money trail
+        AuditEvent                - the decision trail; stores only a HASH of
+                                    tool inputs, never raw argument text, so it
+                                    stays outside the scope of most erasure
+                                    requests by design
+
+The tension between DPDP erasure rights and financial record-keeping duties is
+a legal question, not an engineering one, and is escalated in the master build
+plan Part D. Retention VALUES are therefore left unset here rather than guessed.
 """
 
 from __future__ import annotations
@@ -208,6 +235,23 @@ class User(Base):
     )
     is_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    # ---- DPDP-readiness fields (see the data classification in the module docstring) ----
+    #
+    # Unenforced by design at this stage. Their value now is structural: a
+    # retention column and a stated purpose are cheap to add today and painful
+    # to retrofit across a live schema later. Deletion workflows are post-MVP
+    # (Production Readiness s4.9) and the retention PERIOD is a legal decision
+    # (master build plan Part D), so no default is invented here.
+    #
+    # purpose records WHY this record is held, which is what a consent notice
+    # and a data-principal access request both have to be able to answer.
+    purpose: Mapped[str] = mapped_column(
+        String(80), nullable=False, default="demo_account"
+    )
+    retention_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
 
     goals: Mapped[list[Goal]] = relationship(back_populates="user", cascade="all, delete-orphan")
     spend_policy: Mapped[SpendPolicy | None] = relationship(

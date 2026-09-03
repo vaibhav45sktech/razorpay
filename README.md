@@ -64,8 +64,8 @@ pytest backend/tests -v
 | Phase | Status |
 |---|---|
 | 0 — Repo, environment, tool-calling proof | **done** — app boots, config guard tested (7 tests) |
-| 1 — Data layer | in progress — models, session layer, tamper-evident audit trail done (31 tests) |
-| 2 — Policy engine | not started |
+| 1 — Data layer | **done** — models, session layer, tamper-evident audit trail, append-only ledger, idempotent synthetic seed (69 tests) |
+| 2 — Policy engine | next |
 | 3 — Money state machine (fake executor) | not started |
 | 4 — The Financial Agent | not started |
 | 5 — Razorpay Test Mode | not started |

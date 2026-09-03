@@ -264,3 +264,35 @@ def test_synthetic_flags_default_to_true(db) -> None:
     db.commit()
     assert user.is_synthetic is True
     assert offer.is_synthetic is True
+
+
+# --------------------------------------------------------------------------
+# DPDP-readiness field design (Phase 1 Step 6)
+# --------------------------------------------------------------------------
+
+
+def test_user_records_a_purpose(db) -> None:
+    """A consent notice and an access request both have to answer 'why held?'."""
+    user = make_user(db)
+    assert user.purpose == "demo_account"
+
+
+def test_retention_is_unset_rather_than_guessed(db) -> None:
+    """The retention PERIOD is a legal decision, not an engineering default.
+
+    Master build plan Part D: DPDP erasure rights conflict with financial
+    record-keeping duties, and resolving that needs counsel. So the column
+    exists (cheap now, painful to retrofit) but carries no invented value.
+    """
+    user = make_user(db)
+    assert user.retention_until is None
+
+
+def test_data_classification_is_documented(db) -> None:
+    """The classification is the map you hand a privacy reviewer; keep it present."""
+    from backend.models import entities
+
+    doc = entities.__doc__ or ""
+    assert "DATA CLASSIFICATION" in doc
+    for bucket in ("SYNTHETIC-ONLY", "WOULD-BE-PERSONAL-DATA", "FINANCIAL-RECORD"):
+        assert bucket in doc, f"{bucket} missing from the data classification"
