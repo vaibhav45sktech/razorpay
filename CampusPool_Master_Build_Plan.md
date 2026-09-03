@@ -32,10 +32,11 @@ It merges `CampusPool_MVP_Execution_Playbook.md` (the step-by-step process and e
 | 1 | Steps 3–6 — ledger service, seed data, DPDP fields; spend-tracking decision (D2.1) | ✅ | `v0.1.1-spend-tracking` |
 | 2 | Policy engine + velocity controls, 61 table-driven tests | ✅ | `v0.2-policy-engine` |
 | — | Dependency pins bumped for Python 3.14; verified on 3.10/3.11/3.14 | ✅ | `613e366` |
+| 3 | State machine, idempotent create, approval, settlement, reversal, pool invariant, API + debug routes | ✅ | `v0.3-state-machine` |
 | 1 | Step 2 — `models/db.py`: engine, session factory, transactional scope, FK pragma | ✅ | `1406ed6` |
 | — | *Pulled forward from hardening:* audit hash chain + `audit_service.py` | ✅ | `f5249f1` |
 
-**Test count: 136 passing.** Tags on `main`: `v0.0-skeleton`, `v0.1-data-layer`, `v0.1.1-spend-tracking`, `v0.2-policy-engine`.
+**Test count: 196 passing.** Tags on `main`: `v0.0-skeleton`, `v0.1-data-layer`, `v0.1.1-spend-tracking`, `v0.2-policy-engine`, `v0.3-state-machine`.
 
 ## 0.2 Local tool-calling proof — ✅ PASSED (2026-09-03)
 
@@ -51,7 +52,7 @@ per-step timeout from data rather than a guess.
 
 ## 0.3 Your next action
 
-**Phase 3 — money state machine with the fake executor.** Jump to it below.
+**Phase 4 — the Financial Agent.** Jump to it below. (Phase 4 step 9's approval endpoint already exists from Phase 3; step 9 reduces to proving chat cannot trigger it.)
 
 ## 0.4 Known environment issue
 
