@@ -53,6 +53,29 @@ uvicorn backend.main:app --reload --port 8000
 
 Then open http://localhost:8000/health and http://localhost:8000/docs
 
+## Troubleshooting
+
+**`pip install` says "Building wheel for pydantic-core / PyYAML" and then fails
+with "Microsoft Visual C++ 14.0 or greater is required" or "linker `link.exe`
+not found".**
+A pinned version predates your Python and has no prebuilt wheel, so pip is
+trying to compile it. Don't install Build Tools; pull the latest
+`requirements.txt` (pins are kept at versions with wheels for Python 3.10–3.14)
+and re-run `pip install -r requirements.txt`.
+
+**`.venv\Scripts\Activate.ps1` is refused ("running scripts is disabled").**
+Windows execution policy. For the current window only:
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`, then retry.
+
+**`ollama` is not recognized right after installing it.**
+Close and reopen PowerShell; the installer updates PATH but open windows don't
+see it.
+
+**git says "Another git process seems to be running" / `index.lock` exists.**
+OneDrive holds file handles on the repo. Delete `.git\index.lock` and retry.
+Moving the project outside OneDrive (e.g. `C:\dev\campuspool`) removes this
+permanently.
+
 ## Tests
 
 ```bash
