@@ -1,7 +1,7 @@
 # CampusPool — Master Build Plan
 
 **Version:** 2.0 (consolidated) · **Date:** 2026-09-03 · **Owner:** Vaibhav Mishra
-**Repo:** `github.com/vaibhav45sktech` · **Current branch:** `phase-1-data-layer`
+**Repo:** `github.com/vaibhav45sktech` · **Current branch:** `main` (Phase 2 merged)
 
 **This is the single operational document. Work from this file.**
 
@@ -29,26 +29,29 @@ It merges `CampusPool_MVP_Execution_Playbook.md` (the step-by-step process and e
 | 0 | `main.py` — FastAPI app, `/health`, startup config logging (lifespan pattern) | ✅ | `2a0de88` |
 | 0 | `scratch/prove_tool_calling.py` — Ollama proof script | ✅ written | `2a0de88` |
 | 1 | Step 1 — `models/entities.py`: 12 tables, 16 enums, DB-level guardrails | ✅ | `1406ed6` |
+| 1 | Steps 3–6 — ledger service, seed data, DPDP fields; spend-tracking decision (D2.1) | ✅ | `v0.1.1-spend-tracking` |
+| 2 | Policy engine + velocity controls, 61 table-driven tests | ✅ | `v0.2-policy-engine` |
+| — | Dependency pins bumped for Python 3.14; verified on 3.10/3.11/3.14 | ✅ | `613e366` |
 | 1 | Step 2 — `models/db.py`: engine, session factory, transactional scope, FK pragma | ✅ | `1406ed6` |
 | — | *Pulled forward from hardening:* audit hash chain + `audit_service.py` | ✅ | `f5249f1` |
 
-**Test count: 31 passing** (7 config, 12 schema, 12 audit chain).
-**Tag:** `v0.0-skeleton` on `main`. Phase 1 commits are on `phase-1-data-layer`, not yet merged.
+**Test count: 136 passing.** Tags on `main`: `v0.0-skeleton`, `v0.1-data-layer`, `v0.1.1-spend-tracking`, `v0.2-policy-engine`.
 
-## 0.2 One thing you still owe yourself
+## 0.2 Local tool-calling proof — ✅ PASSED (2026-09-03)
 
-`scratch/prove_tool_calling.py` is written but **you have not run it on Windows yet.** It is the only dependency in this project with no fallback — if the local model can't produce reliable tool calls on your hardware, Phase 4 is in trouble and you want to know that now, not on day five.
+`scratch/prove_tool_calling.py` ran on the demo laptop (Windows, Python 3.14,
+`qwen2.5:7b-instruct` via Ollama) and produced a correctly formed tool call plus
+a faithful narration of the returned result. Verbatim output and the Phase 4
+implications (tool-call IDs present; arguments arrive as parsed dicts) are in
+`docs/tool_calling_proof.md`. The one dependency with no fallback is confirmed.
 
-```bash
-ollama pull qwen2.5:7b-instruct
-python scratch/prove_tool_calling.py
-```
-
-Do this before Phase 2. It takes five minutes.
+Outstanding from this checkpoint: a warm-run latency number
+(`Measure-Command { python scratch\prove_tool_calling.py }`) to set Phase 4's
+per-step timeout from data rather than a guess.
 
 ## 0.3 Your next action
 
-**Phase 1, Step 3 — `services/ledger_service.py`.** Jump to it below.
+**Phase 3 — money state machine with the fake executor.** Jump to it below.
 
 ## 0.4 Known environment issue
 
