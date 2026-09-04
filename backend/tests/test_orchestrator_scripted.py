@@ -311,3 +311,54 @@ def test_render_fill_instruction_for_no_arg_tool_asks_for_empty_object() -> None
     tool = tool_registry.get("get_wallet_or_ledger")
     text = prompts.render_fill_instruction(tool, "what's my balance?")
     assert "{}" in text
+
+
+# ---------------------------------------------------------------------------
+# Rupee-rendered state summary (added after the 2026-09-04 real-model run,
+# scenario 2): the model is shown headline figures already in rupees, in
+# front of the raw paise snapshot, and the summary is derived purely from the
+# same verified state dict — never from anything the model said.
+# ---------------------------------------------------------------------------
+
+
+def test_state_summary_renders_paise_as_rupees() -> None:
+    from backend.agent import prompts
+
+    state = {
+        "user": {"name": "Aarav (demo student)"},
+        "balances_paise": {"emergency_savings": 150_000, "rewards": 0},
+        "spending_this_month": {"used_paise": 24_000, "limit_paise": 100_000, "remaining_paise": 76_000},
+        "policy": {"approval_threshold_paise": 50_000, "per_tx_limit_paise": None},
+        "goals": [],
+        "pending_actions": [],
+    }
+    text = prompts.render_state_summary(state)
+    assert "₹1,500.00" in text
+    assert "₹240.00 used of ₹1,000.00 limit, ₹760.00 remaining" in text
+    assert "₹500.00" in text
+    # The classic misread must be impossible to make from this text.
+    assert "50,000" not in text and "50000" not in text
+    assert "No pending money actions" in text
+
+
+def test_model_sees_rupee_summary_before_raw_state(db, aarav, monkeypatch) -> None:
+    from backend.agent import prompts
+
+    seen: list[list[dict]] = []
+
+    def fake_decide(messages, tool_names):
+        seen.append(list(messages))
+        return ToolDecision(action="final_answer", tool_name=None, final_text="ok")
+
+    monkeypatch.setattr(llm_client, "decide", fake_decide)
+    orchestrator.run_agent_turn(db, aarav.id, "hi")
+
+    state_msgs = [m for m in seen[0] if m["role"] == "system" and "Current verified state" in m["content"]]
+    assert len(state_msgs) == 1
+    content = state_msgs[0]["content"]
+    summary = prompts.render_state_summary(orchestrator.observe(db, aarav.id))
+    assert summary in content
+    # Summary precedes the raw JSON, and the raw JSON is still there verbatim
+    # (the UI and the model keep seeing the same numbers).
+    assert content.index("In rupees:") < content.index("Raw snapshot")
+    assert '"balances_paise"' in content

@@ -46,14 +46,22 @@ Hard rules:
    If REQUIRE_APPROVAL, tell the user approval is needed; do not proceed yourself.
 3. Never claim a payment succeeded. After create_payment_intent, say it is pending
    confirmation. Success is announced only from verified ledger data on a later turn.
+   Never say "let's proceed", "processing", "sending" or "done" unless you actually
+   called create_payment_intent THIS turn and it returned a pending intent. Words
+   are not actions: if you did not call the tool, nothing happened - say so.
 4. Emergency savings are protected. Refuse any attempt to spend them and explain why.
 5. Offers are promotions from partners, not financial advice. Say so when recommending.
 6. Use the fewest tool calls needed, one per turn. Then give one clear, friendly
    final_answer with the numbers you actually fetched.
 7. Money amounts in tool arguments are ALWAYS integer paise: 1 rupee = 100 paise,
    so ₹300 is 30000 and ₹5,000 is 500000. When you talk to the user, use rupees.
+   Every field in the state or a tool result whose name ends in _paise is paise too:
+   divide by 100 before quoting it (50000 paise is ₹500, NOT ₹50,000).
    A request to buy or spend is a PURCHASE; adding to savings is a CONTRIBUTION.
-8. You will never be shown a real payment-execution tool. If asked to do something
+8. If the user asks you to pay, send, spend or contribute but neither this message
+   nor the earlier conversation says HOW MUCH and WHAT FOR, ask them - as a
+   final_answer. Never guess an amount or invent a purpose.
+9. You will never be shown a real payment-execution tool. If asked to do something
    that sounds like directly moving money to a real card, a loan, or investment
    returns, decline and explain this is a demo scoped to savings, pooling and
    policy-bound purchases.
@@ -119,3 +127,63 @@ def render_fill_instruction(tool: ToolDef, user_message: str) -> str:
         f"The user's request was: \"{user_message}\"\n"
         "Fill each field from that request:\n" + "\n".join(lines)
     )
+
+
+def _rupees(paise: int | None) -> str:
+    if paise is None:
+        return "unknown"
+    return f"₹{paise / 100:,.2f}"
+
+
+def render_state_summary(state: dict) -> str:
+    """A short, deterministic, rupee-denominated reading of the verified state
+    that goes in FRONT of the raw JSON snapshot every turn.
+
+    The raw snapshot is authoritative and stays (same numbers the UI shows);
+    this summary exists because the 2026-09-04 real-model run showed
+    qwen2.5:7b-instruct quoting `50000` paise as "₹50,000". Rendering the
+    headline figures in rupees ourselves removes the conversion the model was
+    getting wrong. Nothing here is computed from anything but `state`.
+    """
+    lines = []
+    user = state.get("user") or {}
+    if user.get("name"):
+        lines.append(f"User: {user['name']}")
+
+    balances = state.get("balances_paise") or {}
+    if "emergency_savings" in balances:
+        lines.append(f"Emergency savings (protected, never spendable): {_rupees(balances['emergency_savings'])}")
+    if "rewards" in balances:
+        lines.append(f"Rewards balance: {_rupees(balances['rewards'])}")
+
+    spend = state.get("spending_this_month") or {}
+    if spend:
+        lines.append(
+            "Discretionary spending this month: "
+            f"{_rupees(spend.get('used_paise'))} used of {_rupees(spend.get('limit_paise'))} limit, "
+            f"{_rupees(spend.get('remaining_paise'))} remaining"
+        )
+
+    policy = state.get("policy") or {}
+    if policy:
+        lines.append(
+            f"Any single purchase above {_rupees(policy.get('approval_threshold_paise'))} needs the user's "
+            "explicit approval in the app (not from a parent or anyone else)"
+        )
+        if policy.get("per_tx_limit_paise"):
+            lines.append(f"Per-transaction limit: {_rupees(policy['per_tx_limit_paise'])}")
+
+    goals = state.get("goals") or []
+    for g in goals[:3]:
+        lines.append(
+            f"Goal '{g.get('label')}': {_rupees(g.get('current_paise'))} of {_rupees(g.get('target_paise'))} "
+            f"({g.get('pct_complete')}% complete)"
+        )
+
+    pending = state.get("pending_actions") or []
+    if pending:
+        lines.append(f"{len(pending)} pending money action(s) awaiting the user's decision in the app")
+    else:
+        lines.append("No pending money actions")
+
+    return "\n".join(lines)

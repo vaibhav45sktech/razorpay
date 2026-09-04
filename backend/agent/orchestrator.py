@@ -112,7 +112,12 @@ def run_agent_turn(
         {"role": "system", "content": f"Available tools:\n{catalog}"},
         {
             "role": "system",
-            "content": f"Current verified state (from the ledger, not memory): {json.dumps(state, default=str)}",
+            "content": (
+                "Current verified state (from the ledger, not memory).\n"
+                f"In rupees:\n{prompts.render_state_summary(state)}\n\n"
+                "Raw snapshot (every *_paise field is in paise; divide by 100 for rupees):\n"
+                f"{json.dumps(state, default=str)}"
+            ),
         },
         *history,
         {"role": "user", "content": user_message},
