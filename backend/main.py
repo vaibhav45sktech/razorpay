@@ -18,6 +18,7 @@ from backend.api import chat as chat_routes
 from backend.api import debug as debug_routes
 from backend.api import intents as intent_routes
 from backend.api import state as state_routes
+from backend.api import suggestions as suggestion_routes
 from backend.models import db as database
 
 # Playbook A.6: real logging from day one, not "when something breaks".
@@ -69,6 +70,7 @@ app = FastAPI(
 app.include_router(state_routes.router)
 app.include_router(intent_routes.router)
 app.include_router(chat_routes.router)
+app.include_router(suggestion_routes.router)
 app.include_router(debug_routes.router)
 
 

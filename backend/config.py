@@ -61,6 +61,17 @@ RAZORPAY_ENABLED: bool = RAZORPAY_KEY_ID is not None and RAZORPAY_KEY_SECRET is 
 OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b-instruct")
 
+# --------------------------------------------------------------------------
+# Passive watcher (backend/watcher) — background suggestions from the ledger
+# --------------------------------------------------------------------------
+# A deliberately SMALL model: the watcher only phrases one sentence from facts
+# the code already decided, so a 1.5B model is plenty and keeps RAM low while
+# running all day. Falls back to templated text if Ollama is unreachable.
+WATCHER_MODEL: str = os.environ.get("WATCHER_MODEL", "qwen2.5:1.5b-instruct")
+WATCHER_POLL_SECONDS: float = float(os.environ.get("WATCHER_POLL_SECONDS", "15"))
+# Cooldown before the same kind of suggestion may repeat for the same user/key.
+WATCHER_COOLDOWN_HOURS: float = float(os.environ.get("WATCHER_COOLDOWN_HOURS", "24"))
+
 
 # --------------------------------------------------------------------------
 # Database
@@ -88,6 +99,8 @@ def summary() -> dict[str, object]:
         "razorpay_mode": "test" if RAZORPAY_KEY_ID else "not_configured",
         "ollama_url": OLLAMA_URL,
         "ollama_model": OLLAMA_MODEL,
+        "watcher_model": WATCHER_MODEL,
+        "watcher_poll_seconds": WATCHER_POLL_SECONDS,
         "database": DATABASE_URL.split("/")[-1],
         "debug": DEBUG,
     }

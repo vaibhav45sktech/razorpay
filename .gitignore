@@ -25,3 +25,6 @@ Thumbs.db
 
 # Scratch experiments (kept local, not part of the deliverable)
 scratch/__pycache__/
+
+# Passive watcher runtime files
+logs/
