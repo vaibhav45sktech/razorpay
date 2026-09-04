@@ -14,7 +14,7 @@ from collections.abc import Iterator
 import pytest
 from sqlalchemy import select
 
-from backend.agent import llm_client, orchestrator
+from backend.agent import llm_client, orchestrator, tool_registry
 from backend.agent.llm_client import ToolDecision
 from backend.models.entities import AuditEvent, Bucket, User
 from backend.seed import demo_data
@@ -248,3 +248,66 @@ def test_llm_unavailable_returns_degraded_reply_with_real_state(db, aarav, monke
     assert reply.state is not None
     assert reply.state["balances_paise"]["emergency_savings"] == 1_500 * 100
     assert "unavailable" in reply.text.lower()
+
+
+# ---------------------------------------------------------------------------
+# Step-2 task framing (added after the 2026-09-04 real-model run): the
+# argument-fill call must carry an explicit instruction naming the tool, the
+# user's request, and every field's meaning — and that instruction must not
+# leak into the persistent transcript.
+# ---------------------------------------------------------------------------
+
+
+def test_fill_arguments_receives_task_framing_but_transcript_does_not(db, aarav, monkeypatch) -> None:
+    from backend.agent import prompts
+
+    seen_fill_messages: list[list[dict]] = []
+    seen_decide_messages: list[list[dict]] = []
+    decisions = iter(
+        [
+            ToolDecision(action="call_tool", tool_name="check_policy", final_text=None),
+            ToolDecision(action="final_answer", tool_name=None, final_text="done"),
+        ]
+    )
+
+    def fake_decide(messages, tool_names):
+        seen_decide_messages.append(list(messages))
+        return next(decisions)
+
+    def fake_fill(messages, schema):
+        seen_fill_messages.append(list(messages))
+        return {"action": "PURCHASE", "amount_paise": 500_000, "purpose": "purchase:laptop_bag"}
+
+    monkeypatch.setattr(llm_client, "decide", fake_decide)
+    monkeypatch.setattr(llm_client, "fill_arguments", fake_fill)
+
+    user_message = "Please pay ₹5,000 from my discretionary budget for a new laptop bag"
+    orchestrator.run_agent_turn(db, aarav.id, user_message)
+
+    # The fill call ended with the framing message...
+    assert len(seen_fill_messages) == 1
+    last = seen_fill_messages[0][-1]
+    assert last["role"] == "user"
+    assert "check_policy" in last["content"]
+    assert user_message in last["content"]
+    assert "PURCHASE" in last["content"] and "CONTRIBUTION" in last["content"]
+    assert "paise" in last["content"].lower()
+
+    # ...and matches what prompts.render_fill_instruction renders directly.
+    tool = tool_registry.get("check_policy")
+    assert last["content"] == prompts.render_fill_instruction(tool, user_message)
+
+    # ...but the SECOND decide() call saw a transcript WITHOUT it: the framing
+    # is ephemeral, the transcript stays decision/tool-result shaped.
+    second_decide_transcript = seen_decide_messages[1]
+    assert all(m["content"] != last["content"] for m in second_decide_transcript)
+    roles = [m["role"] for m in second_decide_transcript]
+    assert roles[-1] == "tool", roles
+
+
+def test_render_fill_instruction_for_no_arg_tool_asks_for_empty_object() -> None:
+    from backend.agent import prompts
+
+    tool = tool_registry.get("get_wallet_or_ledger")
+    text = prompts.render_fill_instruction(tool, "what's my balance?")
+    assert "{}" in text

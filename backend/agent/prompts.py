@@ -79,3 +79,43 @@ def render_tool_catalog(tools: list[ToolDef]) -> str:
             f"  arguments schema: {json.dumps(schema, separators=(',', ':'))}"
         )
     return "\n".join(blocks)
+
+
+def render_fill_instruction(tool: ToolDef, user_message: str) -> str:
+    """The step-2 task framing for agent/llm_client.fill_arguments().
+
+    Step 2 is grammar-constrained to the tool's schema, which guarantees the
+    SHAPE of the answer but says nothing about its MEANING. The 2026-09-04
+    manual adversarial run showed what happens without this: handed only the
+    conversation (whose last message is its own routing JSON) and a schema,
+    qwen2.5:7b-instruct filled check_policy with the last enum value of
+    `action` twice in a row (TEST_PAYOUT, then CONTRIBUTION) for a plain
+    purchase request. So step 2 now restates the job explicitly: which tool,
+    what the user actually asked, and each field's meaning, in one message.
+    It is appended for the fill call only and never kept in the transcript.
+    """
+    schema = tool.args_json_schema()
+    props: dict = schema.get("properties", {}) or {}
+    required = set(schema.get("required", []) or [])
+    if not props:
+        return f"Call {tool.name} takes no arguments. Respond with an empty JSON object: {{}}"
+
+    lines = []
+    for field, spec in props.items():
+        desc = spec.get("description", "")
+        # Literal/enum fields render as anyOf/enum in Pydantic's JSON schema.
+        enum = spec.get("enum")
+        if enum is None and "anyOf" in spec:
+            for alt in spec["anyOf"]:
+                if "enum" in alt:
+                    enum = alt["enum"]
+                    break
+        choice = f" One of: {', '.join(map(str, enum))}." if enum else ""
+        req = "required" if field in required else "optional, may be null"
+        lines.append(f"- {field} ({req}):{choice} {desc}".rstrip())
+
+    return (
+        f"You chose the tool {tool.name}. Now provide ONLY its arguments as one JSON object.\n"
+        f"The user's request was: \"{user_message}\"\n"
+        "Fill each field from that request:\n" + "\n".join(lines)
+    )

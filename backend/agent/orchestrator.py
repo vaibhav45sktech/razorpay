@@ -163,7 +163,14 @@ def run_agent_turn(
             result: dict[str, Any] = {"error": f"Tool '{name}' does not exist or is not available to you."}
         else:
             try:
-                raw_args = llm_client.fill_arguments(messages, tool.args_json_schema())
+                # Step 2 gets explicit task framing (see prompts.render_fill_instruction);
+                # it is NOT appended to `messages`, so the transcript the model
+                # sees on later steps stays decision/tool-result shaped.
+                fill_messages = [
+                    *messages,
+                    {"role": "user", "content": prompts.render_fill_instruction(tool, user_message)},
+                ]
+                raw_args = llm_client.fill_arguments(fill_messages, tool.args_json_schema())
             except llm_client.LLMUnavailable as exc:
                 logger.warning("LLM unavailable filling arguments for %s (user %s): %s", name, user_id, exc)
                 return _degraded_reply(state, step)
