@@ -21,7 +21,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Load .env from the repo root, if present. Real environment variables always
 # win over .env values, which is what you want in CI or a deployed setting.
-load_dotenv(BASE_DIR / ".env", override=False)
+# utf-8-sig: Windows Notepad may prepend a byte-order mark, which would
+# otherwise corrupt the NAME of the first variable in the file (seen
+# 2026-09-05: DATABASE_URL on line 1 silently ignored, keys on later lines
+# fine, two processes opening two different databases).
+load_dotenv(BASE_DIR / ".env", override=False, encoding="utf-8-sig")
 
 
 def _get_bool(name: str, default: bool = False) -> bool:
@@ -110,6 +114,8 @@ def summary() -> dict[str, object]:
         "razorpay_webhook_secret_set": RAZORPAY_WEBHOOK_SECRET is not None,
         "ollama_url": OLLAMA_URL,
         "ollama_model": OLLAMA_MODEL,
-        "database": DATABASE_URL.split("/")[-1],
+        # Full location, not just the filename: two processes on two different
+        # files is a real failure mode and must be visible from /health.
+        "database": DATABASE_URL if DATABASE_URL.startswith("sqlite") else DATABASE_URL.split("@")[-1],
         "debug": DEBUG,
     }
