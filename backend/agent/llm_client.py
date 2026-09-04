@@ -198,6 +198,7 @@ def _post_stream(messages: list[dict], fmt: dict[str, Any] | str, *, temperature
         "messages": messages,
         "format": fmt,
         "stream": True,
+        "keep_alive": config.OLLAMA_KEEP_ALIVE,
         "options": {"temperature": temperature},
     }
 

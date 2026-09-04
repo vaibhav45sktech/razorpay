@@ -74,6 +74,21 @@ _UNAVAILABLE_TEXT = (
     "The assistant is temporarily unavailable, so I can't chat right now — "
     "but here are your current verified numbers."
 )
+_PARROT_TEXT = (
+    "I wasn't able to put together a proper answer to that just now — nothing was executed. "
+    "Could you rephrase, or ask me for a specific number or action?"
+)
+
+
+def _is_parrot(reply: str, user_message: str) -> bool:
+    """True when the model's 'answer' is the user's message (ignoring case,
+    punctuation, whitespace and the ₹/? mojibake a Windows shell can produce)."""
+    def norm(t: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", t.lower().replace("₹", "").replace("?", ""))
+    a, b = norm(reply), norm(user_message)
+    return bool(a) and (a == b or (len(a) > 20 and (a in b or b in a)))
+
+
 _EXHAUSTED_TEXT = (
     "I couldn't finish this in my step budget — nothing was executed beyond what I "
     "already reported. Please try a simpler request."
@@ -156,8 +171,8 @@ def run_agent_turn(
             "content": (
                 "Current verified state (from the ledger, not memory).\n"
                 f"In rupees:\n{prompts.render_state_summary(state)}\n\n"
-                "Raw snapshot (every *_paise field is in paise; divide by 100 for rupees):\n"
-                f"{json.dumps(state, default=str)}"
+                "Full snapshot (all amounts already in rupees):\n"
+                f"{json.dumps(prompts.rupee_view(state), default=str)}"
             ),
         },
         *history,
@@ -173,6 +188,7 @@ def run_agent_turn(
     stated = stated_amounts_paise(messages)
     #: (tool name, canonical args) -> result already returned this turn.
     calls_seen: dict[tuple[str, str], dict[str, Any]] = {}
+    corrected_parrot = False
 
     for step in range(MAX_STEPS):
         if time.monotonic() - started > TURN_BUDGET_SECONDS:
@@ -190,7 +206,27 @@ def run_agent_turn(
             return _degraded_reply(state, step)
 
         if decision.action == "final_answer":
-            reply_text = decision.final_text or "I don't have anything further to add."
+            reply_text = (decision.final_text or "").strip()
+            if _is_parrot(reply_text, user_message):
+                # 2026-09-04 run, scenario 2d turn 5: the model returned the
+                # user's own message as its answer. Safe, useless. One
+                # corrective nudge; if it parrots again, say so honestly
+                # rather than echo the user back at themselves.
+                if not corrected_parrot:
+                    corrected_parrot = True
+                    audit_service.write(session, actor=AuditActor.LLM, action="parrot_retry", user_id=user_id)
+                    messages.append({"role": "assistant", "content": json.dumps(decision.model_dump())})
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "That was my own message repeated back to me, not an answer. "
+                            "Answer it: use a tool if you need facts, otherwise reply in your own words."
+                        ),
+                    })
+                    continue
+                reply_text = _PARROT_TEXT
+            elif not reply_text:
+                reply_text = "I don't have anything further to add."
             audit_service.write(session, actor=AuditActor.LLM, action="chat_turn_final_answer", user_id=user_id)
             return AgentReply(text=reply_text, steps=step + 1, state=state)
 
@@ -249,7 +285,11 @@ def run_agent_turn(
                     result = execute_tool(session, user_id, tool, raw_args, stated_amounts=stated)
                     calls_seen[key] = result
 
-        messages.append({"role": "tool", "name": name or "unknown", "content": json.dumps(result, default=str)})
+        # The model's copy of a tool result has every *_paise field rendered as
+        # *_rupees; `result` itself (what was audited / returned) stays in paise.
+        messages.append(
+            {"role": "tool", "name": name or "unknown", "content": json.dumps(prompts.rupee_view(result), default=str)}
+        )
 
     return _exhausted_reply(MAX_STEPS, state, reason="step_budget_exhausted")
 

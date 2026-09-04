@@ -54,11 +54,9 @@ Hard rules:
 6. Use the fewest tool calls needed, one per turn. Never call the same tool with the
    same arguments twice in one turn - the answer cannot change. Then give one clear,
    friendly final_answer with the numbers you actually fetched.
-7. Money amounts in tool arguments are in RUPEES, exactly the number the user said:
-   ₹5,000 is 5000, ₹300 is 300. Never convert, never round, never change it.
-   Fields in the state or a tool result whose name ends in _paise are in paise:
-   divide by 100 before quoting them (50000 paise is ₹500, NOT ₹50,000). Prefer the
-   rupee figures already given in the state summary and in tool "reason" text.
+7. Every amount you see and every amount you send is in RUPEES. In tool arguments,
+   use exactly the number the user said: ₹5,000 is 5000, ₹300 is 300 - never convert,
+   round or change it. Fields ending in _rupees are rupees; quote them as ₹ amounts.
    A request to buy or spend is a PURCHASE; adding to savings is a CONTRIBUTION.
 8. If the user asks you to pay, send, spend or contribute but neither this message
    nor the earlier conversation says HOW MUCH and WHAT FOR, ask them - as a
@@ -192,3 +190,41 @@ def render_state_summary(state: dict) -> str:
         lines.append("No pending money actions")
 
     return "\n".join(lines)
+
+
+def rupee_view(obj):
+    """Recursively rewrite every `*_paise` field as `*_rupees` (÷100) in a
+    structure that is about to be shown to the model. The database, the
+    audit trail and the API all keep paise; only the model's copy changes.
+
+    Added after the 2026-09-04 run, turn 4 of scenario 2d: with the amount
+    boundary already in rupees, the last place a paise number could reach the
+    model was a tool result's `details` — and it duly quoted
+    `requested_paise: 500000` as "₹500,000". So no paise number reaches the
+    model at all any more; there is nothing left for it to misconvert.
+    """
+    def _num(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    def _convert(v):
+        # Value under a *_paise key: a number, or a mapping/list of numbers
+        # (e.g. balances_paise = {"emergency_savings": 150000, ...}).
+        if _num(v):
+            return round(v / 100, 2)
+        if isinstance(v, dict):
+            return {k: (round(x / 100, 2) if _num(x) else rupee_view(x)) for k, x in v.items()}
+        if isinstance(v, list):
+            return [round(x / 100, 2) if _num(x) else rupee_view(x) for x in v]
+        return v
+
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if isinstance(k, str) and k.endswith("_paise"):
+                out[k[: -len("_paise")] + "_rupees"] = _convert(v)
+            else:
+                out[k] = rupee_view(v)
+        return out
+    if isinstance(obj, list):
+        return [rupee_view(x) for x in obj]
+    return obj

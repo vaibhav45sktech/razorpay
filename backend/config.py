@@ -60,6 +60,11 @@ RAZORPAY_ENABLED: bool = RAZORPAY_KEY_ID is not None and RAZORPAY_KEY_SECRET is 
 # --------------------------------------------------------------------------
 OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+# How long Ollama keeps the model loaded after a request. Ollama's default is
+# 5 minutes; on demo hardware a cold 7B load can exceed the first-token budget,
+# which is exactly what the 2026-09-04 adversarial run saw on its first call
+# after a reboot (degraded reply). "-1" keeps it resident until Ollama exits.
+OLLAMA_KEEP_ALIVE: str = os.environ.get("OLLAMA_KEEP_ALIVE", "60m")
 
 
 # --------------------------------------------------------------------------
