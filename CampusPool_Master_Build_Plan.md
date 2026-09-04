@@ -637,6 +637,18 @@ reasoning survives, and so nobody relitigates them by accident.
 
 ---
 
+### D2.2 — Checkout: embedded Checkout.js + CSP; no SRI *(resolved 2026-09-05, Phase 5 Step 4)*
+
+**Chosen:** embedded Razorpay Checkout.js with a strict `Content-Security-Policy` (`default-src 'none'`; script-src limited to self + `checkout.razorpay.com`; frame-src limited to `api.razorpay.com` + `checkout.razorpay.com`), `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`. Card data is entered inside Razorpay's iframe and never reaches this server.
+
+**Not chosen — Subresource Integrity on `checkout.js`:** Razorpay does not publish an SRI hash for that script and updates it in place. A pinned hash would break checkout on their next deploy with no change on our side, and the failure mode (checkout silently refuses to load) is worse than the risk it mitigates for a test-mode demo. The CSP allowlist is the script-attack control we can keep true. Revisit if Razorpay publishes versioned, hashed builds.
+
+**Not chosen — redirect checkout:** would move us outside PCI DSS 4.0's script-protection criterion entirely, but costs the in-app flow the demo is built around. Trigger to revisit: a production deployment.
+
+### D2.3 — Reconciliation exception window *(placeholder, Phase 5 Step 8)*
+
+`RECONCILE_STUCK_AFTER_SECONDS=120` (ask Razorpay after 2 minutes in EXECUTING) and `RECONCILE_EXCEPTION_AFTER_SECONDS=900` (UNKNOWN → EXCEPTION after 15 minutes with no decisive status). The 15 minutes is the plan's `# TODO: confirm with product owner` filled with a placeholder so the sweeper is runnable; the owner can change it in `.env` without a code change.
+
 # Part E — Pin this next to your screen
 
 1. Branch per phase. Small commits. Never break `main`.

@@ -633,6 +633,26 @@ class AuditEvent(Base):
         return f"<AuditEvent seq={self.seq} {self.actor.value} {self.action!r}>"
 
 
+class WebhookEvent(Base):
+    """One row per Razorpay webhook delivery we have ACCEPTED (signature
+    verified), keyed by Razorpay's event id. Duplicate deliveries are normal
+    (dashboard resends, retries on slow 2xx); this table makes the second one
+    a no-op instead of a double settlement. Rejected deliveries (bad
+    signature) are NOT recorded here - they go to the audit trail only, so a
+    forger cannot "claim" an event id."""
+
+    __tablename__ = "webhook_events"
+
+    #: Razorpay's x-razorpay-event-id header.
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    event: Mapped[str] = mapped_column(String(60), nullable=False)
+    order_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    payment_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    body_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(60), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
 class ExceptionRecord(Base):
     """An ambiguous or unsupported situation, surfaced instead of guessed.
 

@@ -54,6 +54,22 @@ if RAZORPAY_KEY_ID is not None and not RAZORPAY_KEY_ID.startswith("rzp_test_"):
 
 RAZORPAY_ENABLED: bool = RAZORPAY_KEY_ID is not None and RAZORPAY_KEY_SECRET is not None
 
+# Public base URL of THIS server as Razorpay must reach it (ngrok in dev).
+# Used only to print the webhook URL to register; never trusted for routing.
+PUBLIC_BASE_URL: str = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
+
+# --------------------------------------------------------------------------
+# Reconciliation (HLD s6.5 "Reconciliation job", master plan Phase 5 Step 8)
+# --------------------------------------------------------------------------
+# How often the in-process sweeper runs, and how long an intent may sit in
+# EXECUTING before the sweeper asks Razorpay for the authoritative status.
+RECONCILE_INTERVAL_SECONDS: float = float(os.environ.get("RECONCILE_INTERVAL_SECONDS", "60"))
+RECONCILE_STUCK_AFTER_SECONDS: float = float(os.environ.get("RECONCILE_STUCK_AFTER_SECONDS", "120"))
+# After this long with still no authoritative answer, the intent goes
+# UNKNOWN -> EXCEPTION and a human decides. The plan marks the exact value
+# "TODO: confirm with product owner"; 15 minutes is the placeholder.
+RECONCILE_EXCEPTION_AFTER_SECONDS: float = float(os.environ.get("RECONCILE_EXCEPTION_AFTER_SECONDS", "900"))
+
 
 # --------------------------------------------------------------------------
 # Local LLM (Ollama) — see HLD s2.6
@@ -91,6 +107,7 @@ def summary() -> dict[str, object]:
     return {
         "razorpay_enabled": RAZORPAY_ENABLED,
         "razorpay_mode": "test" if RAZORPAY_KEY_ID else "not_configured",
+        "razorpay_webhook_secret_set": RAZORPAY_WEBHOOK_SECRET is not None,
         "ollama_url": OLLAMA_URL,
         "ollama_model": OLLAMA_MODEL,
         "database": DATABASE_URL.split("/")[-1],

@@ -37,6 +37,8 @@ IDEMPOTENCY (Guardrail 4, PRD s9 case D "Pay Rs.800 again")
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
@@ -171,6 +173,11 @@ def transition(
 # ---------------------------------------------------------------------------
 # Read helpers (used by the policy engine)
 # ---------------------------------------------------------------------------
+
+
+def get_by_provider_ref(session: Session, provider_ref: str) -> ActionIntent | None:
+    """Look an intent up by the Razorpay order id we stored on it."""
+    return session.execute(select(ActionIntent).where(ActionIntent.provider_ref == provider_ref)).scalar_one_or_none()
 
 
 def get(session: Session, intent_id: str) -> ActionIntent:
@@ -433,6 +440,77 @@ def begin_execution(session: Session, intent: ActionIntent, *, evidence: dict[st
     if intent.status not in (S.ALLOWED, S.APPROVED):
         raise IllegalTransition(intent.id, intent.status, S.EXECUTING)
     return transition(session, intent, S.EXECUTING, evidence=evidence)
+
+
+@dataclass(frozen=True)
+class ExecuteResult:
+    intent_id: str
+    order_id: str
+    amount_paise: int
+    currency: str
+    status: str
+    reused_existing_order: bool
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "intent_id": self.intent_id, "order_id": self.order_id, "amount_paise": self.amount_paise,
+            "currency": self.currency, "status": self.status, "reused_existing_order": self.reused_existing_order,
+        }
+
+
+def execute(session: Session, *, intent_id: str, user_id: str) -> ExecuteResult:
+    """POST /api/intents/{id}/execute (HLD s6.4): turn an ALLOWED/APPROVED
+    intent into a Razorpay ORDER and move it to EXECUTING. The order is what
+    the browser's Checkout opens; money moves only when Razorpay later tells
+    us a payment against it was captured (webhook / verified checkout).
+
+    Idempotent three ways:
+      1. Already has a provider_ref -> return it; never a second order.
+      2. Same receipt already exists at Razorpay (our create_order timed out
+         after their side succeeded - the classic payments bug, master plan
+         Phase 5 Step 7 #8) -> adopt that order rather than create another.
+      3. Already EXECUTING (a retry after case 2 adopted the order) -> return.
+    """
+    from backend import config
+    from backend.services import razorpay_adapter
+
+    intent = get(session, intent_id)
+    if intent.user_id != user_id:
+        raise NotPermitted(f"intent {intent_id} does not belong to user {user_id}")
+
+    if intent.provider_ref:
+        return ExecuteResult(intent.id, intent.provider_ref, intent.amount_paise, config.CURRENCY,
+                             intent.status.value, reused_existing_order=True)
+
+    if intent.status not in (S.ALLOWED, S.APPROVED):
+        raise IllegalTransition(intent.id, intent.status, S.EXECUTING)
+
+    receipt = razorpay_adapter.receipt_for(intent)
+    existing = razorpay_adapter.find_order_by_receipt(receipt)
+    if existing is not None:
+        # An earlier attempt reached Razorpay even though we never heard back.
+        audit_service.write(session, actor=AuditActor.BACKEND, action="order_adopted_by_receipt",
+                            user_id=intent.user_id, intent_id=intent.id,
+                            provider_result={"order_id": existing.get("id"), "receipt": receipt})
+        order = existing
+        reused = True
+    else:
+        try:
+            order = razorpay_adapter.create_order(intent)
+        except razorpay_adapter.ProviderTimeout as exc:
+            # We do NOT know whether the order exists. Do not transition; the
+            # next execute() call resolves it through the receipt lookup above.
+            audit_service.write(session, actor=AuditActor.BACKEND, action="provider_timeout:create_order",
+                                user_id=intent.user_id, intent_id=intent.id, provider_result={"error": str(exc)})
+            raise
+        reused = False
+
+    intent.provider_ref = order["id"]
+    session.flush()
+    transition(session, intent, S.EXECUTING, evidence={"order_id": order["id"], "receipt": receipt,
+                                                        "provider_amount": order.get("amount")})
+    return ExecuteResult(intent.id, order["id"], intent.amount_paise, config.CURRENCY,
+                         intent.status.value, reused_existing_order=reused)
 
 
 def ledger_effect(intent: ActionIntent) -> tuple[LedgerEventType, Bucket, int]:
