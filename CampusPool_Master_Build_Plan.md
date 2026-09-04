@@ -544,6 +544,30 @@ Part A.2, plus two specific to this phase:
 
 ---
 
+## Phase 10 — Improvements adopted from peer review (FinRecon)
+
+*Decision 2026-09-04: Phases 5–9 proceed exactly as written above. The ideas below, drawn from studying a peer hackathon project (FinRecon — Razorpay-vs-bank reconciliation, same "model enriches, policy decides" philosophy), are integrated as ONE final phase after Phase 9, not sprinkled into earlier phases. Where an item overlaps an existing phase step, that step is the home and this list only names the extra bar to clear.*
+
+**Branch:** `phase-10-peer-improvements`
+
+| # | Improvement | Home | What "done" means |
+|---|---|---|---|
+| 1 | **Frozen, replayable benchmark with headline numbers** | Phase 7 Steps 1–3 (raise the bar) | Case set frozen with a content hash; two runners — deterministic (ScriptedLLM, runs in CI, no model) and live-Ollama that writes model transcripts to a committed cache so numbers replay offline; README states "N/N adversarial cases: zero intents created; M/M legitimate cases: correct outcome". Today's `manual_adversarial_tests_results.md` is the seed. |
+| 2 | **No model-visible field may look like licence** | Phase 10 | Audit every LLM-visible tool output; decide explicitly on `calculate_safe_contribution.recommended_amount_paise` (keep only if amount provenance still requires the user to type it, which it does) and document the rule: tools return facts, never scores/confidence/recommendations the model could treat as authorisation. |
+| 3 | **Escalate-on-uncertainty as a benchmarked outcome** | Phase 5 (webhook/signature failure → `ExceptionRecord`) + Phase 7 tier | A tier of deliberately unresolvable cases (unknown purpose category, non-existent goal, unknown offer price, unverifiable webhook) where the correct score is "opened an exception, told the user, did nothing". |
+| 4 | **Content hash on frozen policy decisions** | Phase 5 | `ActionIntent.policy_result_hash` set at decision time and verified before any intent is handed to Razorpay; mismatch → exception, never execution. |
+| 5 | **Benchmark isolation test** | Phase 7 | Structural test: nothing under `backend/` imports from `benchmark/`; ground truth cannot leak into production code. |
+| 6 | **One-command run + hosted demo** | Phase 9 | `docker compose up` with API + Ollama service (model pulled at build); `make test / eval / demo`; degraded mode demonstrated with the model container stopped. Hosted URL if a free tier can run the model, otherwise the compose file is the deliverable and the README says why. |
+| 7 | **Honest README: architecture table + limitations** | Phase 9 | One table of component / role / authority (like FinRecon's); a Limitations section: synthetic data by PRD, 7B local model with documented cooperativeness limits, guardrails proven against a real model on dated runs, Razorpay test mode only. |
+
+**Things we already do that FinRecon does not, to state plainly in the README:** hash-chained (tamper-evident) audit log; fully local model with no hosted API anywhere in the path; amount provenance and taint-lock guardrails proven against a real 7B model.
+
+**Not adopted, deliberately:** a hosted frontier model for the agent (forbidden by PRD §11; today's runs show a 7B model can be made safe with code, which is the stronger engineering claim).
+
+**Commit & tag:** `v1.0-peer-improvements`.
+
+---
+
 # Part C — Deliberately deferred (with trigger conditions)
 
 Not gaps — decisions. Full designs in `CampusPool_Production_Readiness.md` §4. Build each when its trigger fires, not before.
