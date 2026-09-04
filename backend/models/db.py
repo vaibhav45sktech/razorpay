@@ -42,11 +42,26 @@ def _make_engine(url: str) -> Engine:
             """
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
+            # A synced folder (OneDrive) or a second reader can hold the file
+            # for a moment; wait it out instead of failing the request.
+            # Seen 2026-09-04: "database is locked" -> 500 on the first audit
+            # write of a chat turn, with the demo DB inside OneDrive.
+            cursor.execute("PRAGMA busy_timeout=15000")
             cursor.close()
 
     return engine
 
 
+def _ensure_parent_dir(url: str) -> None:
+    """Let DATABASE_URL point somewhere that doesn't exist yet (e.g. a folder
+    outside OneDrive); SQLite creates the file but never the directory."""
+    if url.startswith("sqlite:///") and not url.endswith(":memory:"):
+        from pathlib import Path
+
+        Path(url[len("sqlite:///"):]).expanduser().parent.mkdir(parents=True, exist_ok=True)
+
+
+_ensure_parent_dir(config.DATABASE_URL)
 engine: Engine = _make_engine(config.DATABASE_URL)
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)

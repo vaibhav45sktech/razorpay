@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from backend.agent import orchestrator
@@ -73,6 +74,17 @@ def chat(body: ChatRequest, session: Session = Depends(get_session)) -> ChatResp
     except state_service.UnknownUser:
         session.rollback()
         raise HTTPException(status_code=404, detail="unknown user")
+    except OperationalError as exc:
+        # The database itself was unavailable (locked by a sync client,
+        # another process, a full disk). Nothing was committed. Say so with a
+        # retryable status instead of a generic 500 — this is an outage of
+        # the storage, not a bug in the turn.
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="database temporarily unavailable; nothing was executed - please retry",
+            headers={"Retry-After": "2"},
+        ) from exc
     except Exception:
         # Anything unexpected mid-turn must not leave a half-applied
         # financial write committed (Playbook A.4). Whatever guardrail

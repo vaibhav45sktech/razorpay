@@ -182,3 +182,20 @@ def test_user_id_and_message_are_trimmed(client, seeded, monkeypatch) -> None:
     _script(monkeypatch, [ToolDecision(action="final_answer", tool_name=None, final_text="hi")])
     resp = client.post("/api/chat", json={"user_id": f"  {seeded} ", "message": "  hello  "})
     assert resp.status_code == 200
+
+
+def test_locked_database_is_a_503_not_a_500(client, seeded, monkeypatch) -> None:
+    """A storage-level failure mid-turn must surface as a retryable 503 with
+    a plain message and nothing committed (2026-09-04: OneDrive lock -> 500)."""
+    from sqlalchemy.exc import OperationalError
+
+    from backend.agent import orchestrator
+
+    def boom(*a, **k):
+        raise OperationalError("INSERT INTO audit_events", {}, Exception("database is locked"))
+
+    monkeypatch.setattr(orchestrator, "run_agent_turn", boom)
+    resp = client.post("/api/chat", json={"user_id": seeded, "message": "hi"})
+    assert resp.status_code == 503
+    assert "nothing was executed" in resp.json()["detail"]
+    assert resp.headers.get("retry-after") == "2"

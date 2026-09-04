@@ -73,3 +73,11 @@ def test_test_mode_key_is_accepted() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "True"
+
+
+def test_sqlite_parent_directory_is_created_on_demand(tmp_path) -> None:
+    from backend.models import db as database
+
+    target = tmp_path / "nested" / "deeper" / "x.db"
+    database._ensure_parent_dir(f"sqlite:///{target.as_posix()}")
+    assert target.parent.is_dir()
