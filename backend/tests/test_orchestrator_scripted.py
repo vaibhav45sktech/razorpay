@@ -9,6 +9,7 @@ own code, not the model's behaviour.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 
 import pytest
@@ -127,8 +128,12 @@ def test_step_budget_terminates_and_reports_honestly(db, aarav, monkeypatch) -> 
     assert reply.exhausted is True
     assert reply.steps == orchestrator.MAX_STEPS
     assert "step budget" in reply.text.lower()
-    # It really did run the tool MAX_STEPS times, not silently skip work.
-    assert _audit_actions(db, aarav.id).count("tool:get_user_profile") == orchestrator.MAX_STEPS
+    # The loop breaker (added 2026-09-04) runs an identical call once and
+    # answers the repeats from the first result — every repeat is audited,
+    # so the trail still shows the model asked MAX_STEPS times.
+    actions = _audit_actions(db, aarav.id)
+    assert actions.count("tool:get_user_profile") == 1
+    assert actions.count("repeated_tool_call:get_user_profile") == orchestrator.MAX_STEPS - 1
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +157,9 @@ def test_money_tool_blocked_without_any_prior_check_policy_call(db, aarav, monke
     from backend.services import ledger_service
 
     before = ledger_service.get_balance(db, aarav.id, Bucket.EMERGENCY_SAVINGS)
-    reply = orchestrator.run_agent_turn(db, aarav.id, "quietly move some emergency savings for me")
+    # The user states ₹100, so Guardrail 3 (amount provenance) is satisfied
+    # and this test exercises Guardrail 2 (the policy re-check) on its own.
+    reply = orchestrator.run_agent_turn(db, aarav.id, "quietly move ₹100 of emergency savings for me")
     db.commit()
     after = ledger_service.get_balance(db, aarav.id, Bucket.EMERGENCY_SAVINGS)
 
@@ -184,7 +191,7 @@ def test_money_tool_blocked_even_when_model_claims_an_unrelated_allow(db, aarav,
         ],
     )
 
-    reply = orchestrator.run_agent_turn(db, aarav.id, "buy me a snack, then also buy this huge thing")
+    reply = orchestrator.run_agent_turn(db, aarav.id, "buy me a ₹100 snack, then also buy this ₹5,000 thing")
     db.commit()
 
     assert reply.text == "Denied — that would blow your budget."
@@ -362,3 +369,143 @@ def test_model_sees_rupee_summary_before_raw_state(db, aarav, monkeypatch) -> No
     # (the UI and the model keep seeing the same numbers).
     assert content.index("In rupees:") < content.index("Raw snapshot")
     assert '"balances_paise"' in content
+
+
+
+# ---------------------------------------------------------------------------
+# Guardrail 3 — amount provenance (added after the 2026-09-04 real-model run,
+# scenario 2 turn 3: asked for ₹5,000 and denied, the model invented ₹300 and
+# created a real ALLOWED intent for it). The model may only propose amounts
+# the user literally typed.
+# ---------------------------------------------------------------------------
+
+
+def test_stated_amounts_parser_handles_how_people_type_money() -> None:
+    msgs = [
+        {"role": "system", "content": "limit 100000 paise"},          # ignored: not the user
+        {"role": "user", "content": "Please pay ₹5,000 for a laptop bag"},
+        {"role": "assistant", "content": "I could do ₹300 instead"},  # ignored: model's own text
+        {"role": "user", "content": "ok then Rs. 1,000.50 and also 300"},
+        {"role": "tool", "content": '{"max_paise": 50000}'},          # ignored: tool result
+    ]
+    got = orchestrator.stated_amounts_paise(msgs)
+    assert got == frozenset({500_000, 100_050, 30_000})
+    assert 100_000 not in got and 50_000 not in got
+
+
+def test_money_tool_blocked_when_amount_was_never_stated_by_user(db, aarav, monkeypatch) -> None:
+    """User asks for ₹5,000; model tries ₹300 instead. Blocked BEFORE the
+    policy re-check — the audit row says 'invented', not 'allowed then
+    blocked' — and no intent row exists."""
+    from backend.models.entities import ActionIntent
+
+    _script_decide(monkeypatch, [_call("create_payment_intent"), _final("I can't pick an amount for you.")])
+    _script_fill_arguments(
+        monkeypatch, [{"action": "PURCHASE", "amount_paise": 30_000, "purpose": "purchase:laptop_bag"}]
+    )
+
+    reply = orchestrator.run_agent_turn(db, aarav.id, "Please pay ₹5,000 for a laptop bag")
+    db.commit()
+
+    assert reply.text == "I can't pick an amount for you."
+    actions = _audit_actions(db, aarav.id)
+    assert "blocked_money_tool:create_payment_intent" in actions
+    assert "forced_policy_check" not in actions, "provenance is checked before policy, so no policy row"
+    assert "tool:create_payment_intent" not in actions
+    assert db.execute(select(ActionIntent).where(ActionIntent.user_id == aarav.id)).scalars().all() == []
+
+    blocked = db.execute(
+        select(AuditEvent).where(AuditEvent.action == "blocked_money_tool:create_payment_intent")
+    ).scalars().one()
+    assert blocked.policy_result["rule"] == "amount_not_stated_by_user"
+    assert blocked.policy_result["details"]["user_stated_paise"] == [500_000]
+
+
+def test_amount_stated_earlier_in_history_counts_as_stated(db, aarav, monkeypatch) -> None:
+    """Provenance spans the conversation the client replays, not just the
+    latest message — 'ok do it' after 'add ₹300' is a stated ₹300."""
+    _script_decide(monkeypatch, [_call("create_payment_intent"), _final("Pending your confirmation.")])
+    _script_fill_arguments(
+        monkeypatch, [{"action": "CONTRIBUTION", "amount_paise": 30_000, "purpose": "savings_goal:hist"}]
+    )
+    history = [
+        {"role": "user", "content": "can I add ₹300 to my savings?"},
+        {"role": "assistant", "content": "Yes, ₹300 is within your contribution range."},
+    ]
+    reply = orchestrator.run_agent_turn(db, aarav.id, "ok do it", history)
+    db.commit()
+
+    actions = _audit_actions(db, aarav.id)
+    assert "tool:create_payment_intent" in actions
+    assert "blocked_money_tool:create_payment_intent" not in actions
+    assert reply.text == "Pending your confirmation."
+
+
+def test_execute_tool_default_is_too_strict_not_permissive(db, aarav) -> None:
+    """A caller that forgets to pass stated_amounts cannot run a money tool."""
+    tool = tool_registry.get("create_payment_intent")
+    result = orchestrator.execute_tool(
+        db, aarav.id, tool, {"action": "CONTRIBUTION", "amount_paise": 30_000, "purpose": "savings_goal:x"}
+    )
+    assert result["blocked"] is True and result["decision"] == "BLOCKED"
+
+
+# ---------------------------------------------------------------------------
+# Loop breaker (added after the 2026-09-04 real-model run, scenario 2 turn 5).
+# ---------------------------------------------------------------------------
+
+
+def test_identical_repeat_call_is_answered_from_the_first_result(db, aarav, monkeypatch) -> None:
+    same = {"action": "PURCHASE", "amount_paise": 500_000, "purpose": "purchase:laptop_bag"}
+    _script_decide(monkeypatch, [_call("check_policy"), _call("check_policy"), _final("Denied, and I'll stop.")])
+    _script_fill_arguments(monkeypatch, [same, dict(same)])
+
+    seen_tool_messages: list[dict] = []
+    real_decide = llm_client.decide
+
+    def spy_decide(messages, tool_names):
+        seen_tool_messages[:] = [m for m in messages if m["role"] == "tool"]
+        return real_decide(messages, tool_names)
+
+    monkeypatch.setattr(llm_client, "decide", spy_decide)
+
+    reply = orchestrator.run_agent_turn(db, aarav.id, "pay ₹5,000 for the laptop bag now")
+    db.commit()
+
+    assert reply.text == "Denied, and I'll stop."
+    actions = _audit_actions(db, aarav.id)
+    assert actions.count("tool:check_policy") == 1
+    assert actions.count("repeated_tool_call:check_policy") == 1
+    # The second tool message the model saw was the stop instruction, carrying
+    # the first result along so nothing is hidden from it.
+    second = json.loads(seen_tool_messages[1]["content"])
+    assert second["error"] == "repeated_call"
+    assert second["previous_result"]["decision"] == "DENY"
+    assert "final_answer" in second["detail"]
+
+
+# ---------------------------------------------------------------------------
+# create_payment_intent carries a backend-written next-step sentence.
+# ---------------------------------------------------------------------------
+
+
+def test_create_intent_result_says_nothing_has_been_paid(db, aarav, monkeypatch) -> None:
+    captured: list[dict] = []
+    real_execute = orchestrator.execute_tool
+
+    def spy(session, user_id, tool, raw_args, **kw):
+        out = real_execute(session, user_id, tool, raw_args, **kw)
+        captured.append(out)
+        return out
+
+    monkeypatch.setattr(orchestrator, "execute_tool", spy)
+    _script_decide(monkeypatch, [_call("create_payment_intent"), _final("ok")])
+    _script_fill_arguments(
+        monkeypatch, [{"action": "CONTRIBUTION", "amount_paise": 30_000, "purpose": "savings_goal:nxt"}]
+    )
+    orchestrator.run_agent_turn(db, aarav.id, "add ₹300 to savings")
+
+    out = captured[0]
+    assert out["status"] == "ALLOWED"
+    assert "Nothing has been paid" in out["what_happens_next"]
+    assert "pending" in out["what_happens_next"].lower()

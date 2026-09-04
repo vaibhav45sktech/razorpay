@@ -21,6 +21,28 @@ from backend.models.schemas import CreateIntentArgs, CreateIntentOut
 from backend.services import money_action_service
 
 
+_NEXT_BY_STATUS = {
+    "ALLOWED": (
+        "An intent has been RECORDED only. Nothing has been paid or moved. The user must "
+        "confirm and complete the payment in the app before anything happens. Tell the "
+        "user it is pending their confirmation."
+    ),
+    "AWAITING_APPROVAL": (
+        "Nothing has been paid or moved. This amount is above the approval threshold, so the "
+        "user must explicitly approve it in the app first. Tell the user it needs their approval."
+    ),
+    "DENIED": "Policy denied this. Nothing was created that can be executed. Tell the user why.",
+    "CLOSED": "Policy denied this. Nothing was created that can be executed. Tell the user why.",
+}
+
+
+def _what_happens_next(status: str, duplicate: bool) -> str:
+    text = _NEXT_BY_STATUS.get(status, "Nothing has been paid or moved. Report the status to the user as-is.")
+    if duplicate:
+        text = "This is the SAME intent as before (no second one was created). " + text
+    return text
+
+
 def create_payment_intent(session: Session, user_id: str, args: CreateIntentArgs) -> CreateIntentOut:
     result = money_action_service.create(
         session,
@@ -31,4 +53,5 @@ def create_payment_intent(session: Session, user_id: str, args: CreateIntentArgs
         bucket=args.bucket,
         actor=AuditActor.LLM,
     )
-    return CreateIntentOut(**result.as_dict())
+    data = result.as_dict()
+    return CreateIntentOut(**data, what_happens_next=_what_happens_next(data["status"], data["duplicate"]))

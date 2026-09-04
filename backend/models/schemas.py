@@ -265,6 +265,12 @@ class CreateIntentOut(ToolOutput):
     amount_paise: int
     type: str
     purpose: str
+    #: A backend-written, status-specific sentence the model can repeat to the
+    #: user. Added after the 2026-09-04 real-model run, where an ALLOWED intent
+    #: was narrated as "created successfully — you can proceed". Small models
+    #: echo tool text far more reliably than they obey a prompt rule, so the
+    #: honest sentence travels inside the result.
+    what_happens_next: str
 
 
 # ---------------------------------------------------------------------------

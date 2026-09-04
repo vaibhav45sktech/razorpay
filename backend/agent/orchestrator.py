@@ -39,7 +39,9 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import re
 import time
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -70,6 +72,39 @@ _EXHAUSTED_TEXT = (
     "I couldn't finish this in my step budget — nothing was executed beyond what I "
     "already reported. Please try a simpler request."
 )
+
+#: Numbers as people type money: "5000", "5,000", "₹5,000", "Rs. 300", "1,000.50".
+_AMOUNT_RE = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{2,3})+|\d+)(?:\.(\d{1,2}))?(?![\w.])")
+
+
+def stated_amounts_paise(messages: list[dict[str, Any]]) -> frozenset[int]:
+    """Every rupee amount the USER has literally typed in this conversation,
+    as integer paise. Only role == "user" messages count — never the model's
+    own text, never tool results, never the state snapshot.
+
+    Guardrail 3 (amount provenance) is built on this. Added after the
+    2026-09-04 real-model run: asked for ₹5,000 and denied, qwen2.5:7b-instruct
+    invented ₹300 on the next turn and created a real ALLOWED intent for it.
+    The policy engine cannot know the user never said ₹300 — only the
+    transcript can — so the orchestrator checks the transcript itself. The
+    match is deliberately literal: an amount spelled out in words ("three
+    hundred") will not match, and the model is then told to ask the user to
+    state the amount as a number. Missing a valid request is recoverable;
+    executing an invented one is not.
+    """
+    found: set[int] = set()
+    for m in messages:
+        if m.get("role") != "user":
+            continue
+        for whole, frac in _AMOUNT_RE.findall(str(m.get("content", ""))):
+            try:
+                rupees = Decimal(whole.replace(",", "") + ("." + frac if frac else ""))
+            except InvalidOperation:
+                continue
+            paise = int(rupees * 100)
+            if paise > 0:
+                found.add(paise)
+    return frozenset(found)
 
 
 @dataclasses.dataclass
@@ -129,6 +164,9 @@ def run_agent_turn(
     )
 
     started = time.monotonic()
+    stated = stated_amounts_paise(messages)
+    #: (tool name, canonical args) -> result already returned this turn.
+    calls_seen: dict[tuple[str, str], dict[str, Any]] = {}
 
     for step in range(MAX_STEPS):
         if time.monotonic() - started > TURN_BUDGET_SECONDS:
@@ -182,16 +220,49 @@ def run_agent_turn(
             except llm_client.LLMMalformedOutput as exc:
                 result = {"error": "invalid_arguments", "detail": f"could not parse arguments: {exc}"}
             else:
-                result = execute_tool(session, user_id, tool, raw_args)
+                key = (tool.name, json.dumps(raw_args, sort_keys=True, default=str))
+                if key in calls_seen:
+                    # Loop breaker (2026-09-04 run, scenario 2 turn 5: four
+                    # identical check_policy calls until the step budget ran
+                    # out). Same tool + same args in one turn cannot yield a
+                    # different answer, so return the answer it already got,
+                    # framed as an instruction to stop.
+                    audit_service.write(
+                        session, actor=AuditActor.LLM, action=f"repeated_tool_call:{tool.name}",
+                        user_id=user_id, inputs=raw_args,
+                    )
+                    result = {
+                        "error": "repeated_call",
+                        "detail": (
+                            f"You already called {tool.name} with these exact arguments this turn. "
+                            "The result cannot change. Do not call it again — give the user your final_answer now."
+                        ),
+                        "previous_result": calls_seen[key],
+                    }
+                else:
+                    result = execute_tool(session, user_id, tool, raw_args, stated_amounts=stated)
+                    calls_seen[key] = result
 
         messages.append({"role": "tool", "name": name or "unknown", "content": json.dumps(result, default=str)})
 
     return _exhausted_reply(MAX_STEPS, state, reason="step_budget_exhausted")
 
 
-def execute_tool(session: Session, user_id: str, tool: ToolDef, raw_args: dict[str, Any]) -> dict[str, Any]:
+def execute_tool(
+    session: Session,
+    user_id: str,
+    tool: ToolDef,
+    raw_args: dict[str, Any],
+    *,
+    stated_amounts: frozenset[int] = frozenset(),
+) -> dict[str, Any]:
     """Run one LLM-requested tool for real. Every call here — including
     refused and blocked ones — lands in the audit log.
+
+    `stated_amounts` is the set of paise amounts the user literally typed this
+    conversation (see stated_amounts_paise). It defaults to EMPTY, which means
+    a caller that forgets to pass it cannot run a money tool at all — the
+    failure mode is "too strict", never "silently permissive".
 
     Preconditions the caller (run_agent_turn) has already established: `tool`
     is a registered, LLM-visible ToolDef. This function does not re-derive
@@ -214,6 +285,40 @@ def execute_tool(session: Session, user_id: str, tool: ToolDef, raw_args: dict[s
         amount_paise = getattr(parsed, "amount_paise")
         purpose = getattr(parsed, "purpose")
         bucket = getattr(parsed, "bucket", None)
+
+        # Guardrail 3 — amount provenance: the model may only propose an
+        # amount the user actually typed. The policy engine judges whether an
+        # amount is *permitted*; only the transcript can say whether it was
+        # *requested*. Checked before the policy re-check so the audit trail
+        # reads truthfully: an invented amount is blocked as invented, not
+        # "allowed by policy then blocked".
+        if amount_paise not in stated_amounts:
+            verdict = {
+                "decision": "BLOCKED",
+                "rule": "amount_not_stated_by_user",
+                "reason": (
+                    f"The user never stated an amount of ₹{amount_paise / 100:,.2f} in this conversation. "
+                    "The agent may not choose an amount on the user's behalf."
+                ),
+                "details": {
+                    "requested_paise": amount_paise,
+                    "user_stated_paise": sorted(stated_amounts),
+                    "purpose": purpose,
+                },
+            }
+            audit_service.write(
+                session, actor=AuditActor.LLM, action=f"blocked_money_tool:{tool.name}", user_id=user_id,
+                inputs=raw_args, policy_result=verdict,
+            )
+            return {
+                "blocked": True,
+                "decision": "BLOCKED",
+                "reason": verdict["reason"],
+                "hint": (
+                    "Do not pick an amount yourself. Ask the user to state the exact amount in rupees "
+                    "as a number, then call check_policy with that amount."
+                ),
+            }
 
         # Guardrail 2 — THE load-bearing guarantee (see module docstring):
         # re-run check_policy ourselves, unconditionally, regardless of
