@@ -64,6 +64,12 @@ TURN_BUDGET_SECONDS = 45.0
 #: Tools that require the independent policy re-check before they may run.
 MONEY_TOOLS: frozenset[str] = frozenset({"create_payment_intent"})
 
+#: Tools that carry a user-proposed amount and therefore get the amount-
+#: provenance check (Guardrail 3). check_policy is read-only, but letting the
+#: model probe amounts the user never said is how "you can contribute ₹500!"
+#: replies to a ₹5,000 purchase request were born (2026-09-04, scenario 2).
+AMOUNT_TOOLS: frozenset[str] = MONEY_TOOLS | frozenset({"check_policy"})
+
 _UNAVAILABLE_TEXT = (
     "The assistant is temporarily unavailable, so I can't chat right now — "
     "but here are your current verified numbers."
@@ -280,11 +286,9 @@ def execute_tool(
     except ValidationError as exc:
         return {"error": "invalid_arguments", "detail": exc.errors()}
 
-    if tool.name in MONEY_TOOLS:
-        action = getattr(parsed, "action")
+    if tool.name in AMOUNT_TOOLS:
         amount_paise = getattr(parsed, "amount_paise")
         purpose = getattr(parsed, "purpose")
-        bucket = getattr(parsed, "bucket", None)
 
         # Guardrail 3 — amount provenance: the model may only propose an
         # amount the user actually typed. The policy engine judges whether an
@@ -293,6 +297,10 @@ def execute_tool(
         # reads truthfully: an invented amount is blocked as invented, not
         # "allowed by policy then blocked".
         if amount_paise not in stated_amounts:
+            audit_action = (
+                f"blocked_money_tool:{tool.name}" if tool.name in MONEY_TOOLS
+                else f"blocked_unstated_amount:{tool.name}"
+            )
             verdict = {
                 "decision": "BLOCKED",
                 "rule": "amount_not_stated_by_user",
@@ -307,7 +315,7 @@ def execute_tool(
                 },
             }
             audit_service.write(
-                session, actor=AuditActor.LLM, action=f"blocked_money_tool:{tool.name}", user_id=user_id,
+                session, actor=AuditActor.LLM, action=audit_action, user_id=user_id,
                 inputs=raw_args, policy_result=verdict,
             )
             return {
@@ -315,10 +323,16 @@ def execute_tool(
                 "decision": "BLOCKED",
                 "reason": verdict["reason"],
                 "hint": (
-                    "Do not pick an amount yourself. Ask the user to state the exact amount in rupees "
-                    "as a number, then call check_policy with that amount."
+                    "Do not pick an amount yourself. Only use amounts the user typed. If the user's "
+                    "amount was denied, tell them so and stop; you may ask them to name a different amount."
                 ),
             }
+
+    if tool.name in MONEY_TOOLS:
+        action = getattr(parsed, "action")
+        amount_paise = getattr(parsed, "amount_paise")
+        purpose = getattr(parsed, "purpose")
+        bucket = getattr(parsed, "bucket", None)
 
         # Guardrail 2 — THE load-bearing guarantee (see module docstring):
         # re-run check_policy ourselves, unconditionally, regardless of

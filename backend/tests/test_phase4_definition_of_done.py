@@ -43,8 +43,8 @@ def test_audit_chain_survives_a_full_agent_turn(db, aarav, monkeypatch) -> None:
         ],
         arg_sets=[
             {},
-            {"action": "CONTRIBUTION", "amount_paise": 300 * 100, "purpose": "savings_goal:e2e"},
-            {"action": "CONTRIBUTION", "amount_paise": 300 * 100, "purpose": "savings_goal:e2e"},
+            {"action": "CONTRIBUTION", "amount_rupees": 300, "purpose": "savings_goal:e2e"},
+            {"action": "CONTRIBUTION", "amount_rupees": 300, "purpose": "savings_goal:e2e"},
         ],
     )
 

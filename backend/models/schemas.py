@@ -196,8 +196,8 @@ _ACTION_DESC = (
     "CONTRIBUTION = the user wants to add money to their savings."
 )
 _AMOUNT_DESC = (
-    "Amount as a positive integer number of PAISE, never rupees. "
-    "1 rupee = 100 paise, so ₹300 = 30000 and ₹5,000 = 500000."
+    "Amount in RUPEES, exactly the number the user said. ₹5,000 is 5000; ₹300 is 300; "
+    "₹1,000.50 is 1000.50. Do NOT convert to paise and do NOT change the user's number."
 )
 _BUCKET_DESC = (
     "For PURCHASE only: which bucket the money would leave. Leave null to use "
@@ -215,7 +215,17 @@ class CheckPolicyArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["PURCHASE", "CONTRIBUTION"] = Field(..., description=_ACTION_DESC)
-    amount_paise: int = Field(..., gt=0, description=_AMOUNT_DESC)
+    amount_rupees: float = Field(..., gt=0, description=_AMOUNT_DESC)
+
+    @property
+    def amount_paise(self) -> int:
+        """The codebase's unit. Converted HERE, in code, at the model boundary —
+        the 2026-09-04 real-model run showed qwen2.5:7b-instruct turning
+        "₹5,000" into 5,000,000 paise on two of five attempts even with the
+        conversion spelled out in the prompt. A 7B model should never be
+        asked to multiply by 100; the user speaks rupees, so the model does too.
+        """
+        return int(round(self.amount_rupees * 100))
     purpose: str = Field(
         ..., min_length=1,
         description="Short structured purpose, e.g. 'purchase:laptop_bag' or 'savings_goal:gol_abc'.",
@@ -248,7 +258,17 @@ class CreateIntentArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["PURCHASE", "CONTRIBUTION"] = Field(..., description=_ACTION_DESC)
-    amount_paise: int = Field(..., gt=0, description=_AMOUNT_DESC)
+    amount_rupees: float = Field(..., gt=0, description=_AMOUNT_DESC)
+
+    @property
+    def amount_paise(self) -> int:
+        """The codebase's unit. Converted HERE, in code, at the model boundary —
+        the 2026-09-04 real-model run showed qwen2.5:7b-instruct turning
+        "₹5,000" into 5,000,000 paise on two of five attempts even with the
+        conversion spelled out in the prompt. A 7B model should never be
+        asked to multiply by 100; the user speaks rupees, so the model does too.
+        """
+        return int(round(self.amount_rupees * 100))
     purpose: str = Field(
         ..., min_length=1,
         description="Short structured purpose, e.g. 'purchase:laptop_bag' or 'savings_goal:gol_abc'. "

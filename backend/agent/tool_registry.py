@@ -154,7 +154,7 @@ TOOLS: dict[str, ToolDef] = {
         description=(
             "Check whether a proposed PURCHASE or CONTRIBUTION would be ALLOW, DENY, "
             "or REQUIRE_APPROVAL, with the reason. Always call this BEFORE proposing "
-            "any payment, contribution, or purchase. Amounts are in paise (₹1 = 100)."
+            "any payment, contribution, or purchase. Amounts are in rupees, as the user said them."
         ),
         args_schema=s.CheckPolicyArgs,
         output_schema=s.CheckPolicyOut,

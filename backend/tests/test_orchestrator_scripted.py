@@ -151,7 +151,7 @@ def test_money_tool_blocked_without_any_prior_check_policy_call(db, aarav, monke
     _script_decide(monkeypatch, [_call("create_payment_intent"), _final("That was denied.")])
     _script_fill_arguments(
         monkeypatch,
-        [{"action": "PURCHASE", "amount_paise": 10_000, "purpose": "purchase:sneaky", "bucket": "emergency_savings"}],
+        [{"action": "PURCHASE", "amount_rupees": 100, "purpose": "purchase:sneaky", "bucket": "emergency_savings"}],
     )
 
     from backend.services import ledger_service
@@ -186,8 +186,8 @@ def test_money_tool_blocked_even_when_model_claims_an_unrelated_allow(db, aarav,
     _script_fill_arguments(
         monkeypatch,
         [
-            {"action": "PURCHASE", "amount_paise": 100 * 100, "purpose": "purchase:small_snack"},
-            {"action": "PURCHASE", "amount_paise": 5_000 * 100, "purpose": "purchase:huge_thing"},
+            {"action": "PURCHASE", "amount_rupees": 100, "purpose": "purchase:small_snack"},
+            {"action": "PURCHASE", "amount_rupees": 5000, "purpose": "purchase:huge_thing"},
         ],
     )
 
@@ -215,8 +215,8 @@ def test_a_legitimate_contribution_is_allowed_end_to_end(db, aarav, monkeypatch)
     _script_fill_arguments(
         monkeypatch,
         [
-            {"action": "CONTRIBUTION", "amount_paise": 200 * 100, "purpose": "savings_goal:cushion"},
-            {"action": "CONTRIBUTION", "amount_paise": 200 * 100, "purpose": "savings_goal:cushion"},
+            {"action": "CONTRIBUTION", "amount_rupees": 200, "purpose": "savings_goal:cushion"},
+            {"action": "CONTRIBUTION", "amount_rupees": 200, "purpose": "savings_goal:cushion"},
         ],
     )
 
@@ -283,7 +283,7 @@ def test_fill_arguments_receives_task_framing_but_transcript_does_not(db, aarav,
 
     def fake_fill(messages, schema):
         seen_fill_messages.append(list(messages))
-        return {"action": "PURCHASE", "amount_paise": 500_000, "purpose": "purchase:laptop_bag"}
+        return {"action": "PURCHASE", "amount_rupees": 5000, "purpose": "purchase:laptop_bag"}
 
     monkeypatch.setattr(llm_client, "decide", fake_decide)
     monkeypatch.setattr(llm_client, "fill_arguments", fake_fill)
@@ -401,7 +401,7 @@ def test_money_tool_blocked_when_amount_was_never_stated_by_user(db, aarav, monk
 
     _script_decide(monkeypatch, [_call("create_payment_intent"), _final("I can't pick an amount for you.")])
     _script_fill_arguments(
-        monkeypatch, [{"action": "PURCHASE", "amount_paise": 30_000, "purpose": "purchase:laptop_bag"}]
+        monkeypatch, [{"action": "PURCHASE", "amount_rupees": 300, "purpose": "purchase:laptop_bag"}]
     )
 
     reply = orchestrator.run_agent_turn(db, aarav.id, "Please pay ₹5,000 for a laptop bag")
@@ -426,7 +426,7 @@ def test_amount_stated_earlier_in_history_counts_as_stated(db, aarav, monkeypatc
     latest message — 'ok do it' after 'add ₹300' is a stated ₹300."""
     _script_decide(monkeypatch, [_call("create_payment_intent"), _final("Pending your confirmation.")])
     _script_fill_arguments(
-        monkeypatch, [{"action": "CONTRIBUTION", "amount_paise": 30_000, "purpose": "savings_goal:hist"}]
+        monkeypatch, [{"action": "CONTRIBUTION", "amount_rupees": 300, "purpose": "savings_goal:hist"}]
     )
     history = [
         {"role": "user", "content": "can I add ₹300 to my savings?"},
@@ -445,7 +445,7 @@ def test_execute_tool_default_is_too_strict_not_permissive(db, aarav) -> None:
     """A caller that forgets to pass stated_amounts cannot run a money tool."""
     tool = tool_registry.get("create_payment_intent")
     result = orchestrator.execute_tool(
-        db, aarav.id, tool, {"action": "CONTRIBUTION", "amount_paise": 30_000, "purpose": "savings_goal:x"}
+        db, aarav.id, tool, {"action": "CONTRIBUTION", "amount_rupees": 300, "purpose": "savings_goal:x"}
     )
     assert result["blocked"] is True and result["decision"] == "BLOCKED"
 
@@ -456,7 +456,7 @@ def test_execute_tool_default_is_too_strict_not_permissive(db, aarav) -> None:
 
 
 def test_identical_repeat_call_is_answered_from_the_first_result(db, aarav, monkeypatch) -> None:
-    same = {"action": "PURCHASE", "amount_paise": 500_000, "purpose": "purchase:laptop_bag"}
+    same = {"action": "PURCHASE", "amount_rupees": 5000, "purpose": "purchase:laptop_bag"}
     _script_decide(monkeypatch, [_call("check_policy"), _call("check_policy"), _final("Denied, and I'll stop.")])
     _script_fill_arguments(monkeypatch, [same, dict(same)])
 
@@ -501,7 +501,7 @@ def test_create_intent_result_says_nothing_has_been_paid(db, aarav, monkeypatch)
     monkeypatch.setattr(orchestrator, "execute_tool", spy)
     _script_decide(monkeypatch, [_call("create_payment_intent"), _final("ok")])
     _script_fill_arguments(
-        monkeypatch, [{"action": "CONTRIBUTION", "amount_paise": 30_000, "purpose": "savings_goal:nxt"}]
+        monkeypatch, [{"action": "CONTRIBUTION", "amount_rupees": 300, "purpose": "savings_goal:nxt"}]
     )
     orchestrator.run_agent_turn(db, aarav.id, "add ₹300 to savings")
 
@@ -509,3 +509,59 @@ def test_create_intent_result_says_nothing_has_been_paid(db, aarav, monkeypatch)
     assert out["status"] == "ALLOWED"
     assert "Nothing has been paid" in out["what_happens_next"]
     assert "pending" in out["what_happens_next"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Rupees at the model boundary (added after the 2026-09-04 run, scenario 2c:
+# "₹5,000" became 5,000,000 paise on two of five attempts). The model now
+# passes rupees; the code converts.
+# ---------------------------------------------------------------------------
+
+
+def test_model_facing_money_schemas_take_rupees_and_convert_in_code() -> None:
+    from backend.models.schemas import CheckPolicyArgs, CreateIntentArgs
+
+    for cls in (CheckPolicyArgs, CreateIntentArgs):
+        schema = tool_registry.get(
+            "check_policy" if cls is CheckPolicyArgs else "create_payment_intent"
+        ).args_json_schema()
+        assert "amount_rupees" in schema["properties"]
+        assert "amount_paise" not in schema["properties"], "the model must never be asked for paise"
+        assert "RUPEES" in schema["properties"]["amount_rupees"]["description"]
+
+    assert CheckPolicyArgs(action="PURCHASE", amount_rupees=5000, purpose="p").amount_paise == 500_000
+    assert CreateIntentArgs(action="CONTRIBUTION", amount_rupees=300, purpose="s").amount_paise == 30_000
+    assert CreateIntentArgs(action="CONTRIBUTION", amount_rupees=1000.50, purpose="s").amount_paise == 100_050
+
+
+def test_check_policy_with_unstated_amount_is_blocked_not_answered(db, aarav, monkeypatch) -> None:
+    """User asks about ₹5,000; the model 'helpfully' probes ₹500 instead.
+    Read-only or not, that probe is what produced 'you can contribute ₹500!'
+    replies to a purchase request — so it is refused, and audited under its
+    own action name (not blocked_money_tool: no money tool was involved)."""
+    _script_decide(monkeypatch, [_call("check_policy"), _final("I can only check amounts you've given me.")])
+    _script_fill_arguments(monkeypatch, [{"action": "CONTRIBUTION", "amount_rupees": 500, "purpose": "savings_goal:x"}])
+
+    reply = orchestrator.run_agent_turn(db, aarav.id, "pay ₹5,000 for a laptop bag")
+    db.commit()
+
+    actions = _audit_actions(db, aarav.id)
+    assert "blocked_unstated_amount:check_policy" in actions
+    assert "tool:check_policy" not in actions
+    assert "blocked_money_tool:check_policy" not in actions
+    assert reply.text == "I can only check amounts you've given me."
+
+
+def test_user_typed_rupees_match_model_rupees_end_to_end(db, aarav, monkeypatch) -> None:
+    """'₹5,000' in the user's text and amount_rupees=5000 from the model meet
+    as the same 500000 paise — the whole point of the boundary change."""
+    _script_decide(monkeypatch, [_call("check_policy"), _final("Denied.")])
+    _script_fill_arguments(monkeypatch, [{"action": "PURCHASE", "amount_rupees": 5000, "purpose": "purchase:laptop_bag"}])
+
+    orchestrator.run_agent_turn(db, aarav.id, "Please pay ₹5,000 for a laptop bag")
+    db.commit()
+
+    row = db.execute(select(AuditEvent).where(AuditEvent.action == "tool:check_policy")).scalars().one()
+    assert row.policy_result["details"]["requested_paise"] == 500_000
+    assert row.policy_result["decision"] == "DENY"
+    assert row.policy_result["rule"] == "monthly_limit"
