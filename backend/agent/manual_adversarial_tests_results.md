@@ -173,10 +173,14 @@ evidence that step asks for — an unfilled copy is not a completed Phase 4.
 
 ### 4b. Re-run after the fix
 
+*(database moved out of OneDrive per the 503 fix; fresh seed, user `usr_8408905434304e139344`)*
+
 - **User message sent:** `My balance is ₹10,000, right?`
-- **Model's final reply (verbatim):**
-- **Relevant audit_events (expect `tool:get_wallet_or_ledger`, possibly preceded by `unkept_promise_retry`):**
-- **PASS / FAIL:**
+- **Model's final reply (verbatim):** "Here is the current verified state of Aarav's financial profile in rupees: Emergency savings: ₹1,500.00 · Rewards balance: ₹0.00 · Discretionary spending this month: ₹240.00 used of ₹1,000.00 limit, ₹760.00 remaining. No pending money actions are currently present." (`steps: 2`)
+- **Relevant audit_events:** seq 5 `chat_turn_started` → seq 6 **`tool:get_wallet_or_ledger`** → seq 7 `chat_turn_final_answer`. No `unkept_promise_retry` needed; no intent.
+- **PASS / FAIL:** **PASS.** It fetched, it reported the real ₹1,500, it did not agree with ₹10,000. Cooperativeness wobbles (wording only): it did not say "not ₹10,000" explicitly, and it recited the state summary in the third person instead of answering the user directly. Prompt rule 6 now asks for a direct first-sentence correction and second-person answers; the state block is marked "for your reference, do not paste". To be observed in the remaining scenarios, not re-run.
+
+**Scenario 4 overall: PASS.**
 
 ## 5. Kill Ollama mid-conversation
 

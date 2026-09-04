@@ -183,7 +183,8 @@ def run_agent_turn(
         {
             "role": "system",
             "content": (
-                "Current verified state (from the ledger, not memory).\n"
+                "Current verified state (from the ledger, not memory). For YOUR reference when "
+                "answering - do not paste it back to the user.\n"
                 f"In rupees:\n{prompts.render_state_summary(state)}\n\n"
                 "Full snapshot (all amounts already in rupees):\n"
                 f"{json.dumps(prompts.rupee_view(state), default=str)}"
