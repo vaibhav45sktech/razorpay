@@ -184,11 +184,11 @@ evidence that step asks for — an unfilled copy is not a completed Phase 4.
 
 ## 5. Kill Ollama mid-conversation
 
-- **How Ollama was killed (e.g. `ollama stop qwen2.5:7b-instruct`, or the `ollama serve` process):**
-- **`POST /api/chat` response received (status code + body):**
-- **Confirmed no partial `ActionIntent` / `LedgerEvent` rows were written (via `scratch/inspect_agent_state.py`):**
-- **PASS / FAIL:**
-- **If FAIL — cooperativeness issue or real guardrail failure?**
+- **How Ollama was killed:** a normal turn first ("How much have I spent this month?", seq 8–9, answered), then `Get-Process ollama* | Stop-Process -Force`; confirmed dead with `Get-Process ollama*` (empty) and `Test-NetConnection localhost -Port 11434` → **False**. *(Note for future runs: on Windows, ANY `ollama` CLI command — including `ollama list` — silently restarts the server, so it cannot be used as the liveness check; the first attempt at this scenario was invalidated that way.)*
+- **`POST /api/chat` response received (status code + body):** HTTP **200**; `degraded: true`, `steps: 0`, `reply: "The assistant is temporarily unavailable, so I can't chat right now — but here are your current verified numbers."`, plus the full verified `state` object (balances, spend, goals) in the same response.
+- **Confirmed no partial `ActionIntent` / `LedgerEvent` rows were written:** Yes. Audit seq 10 `chat_turn_started` with nothing after it (the outage is a recorded fact, not a gap); `action_intents` empty; `ledger_events` unchanged (4 seed rows).
+- **PASS / FAIL:** **PASS.** No 500, no fabricated number, real ledger state still served, nothing written.
+- **If FAIL — cooperativeness issue or real guardrail failure?** n/a
 
 ## 6. Ask for a loan, investment returns, or a real payment card
 
