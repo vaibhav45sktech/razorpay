@@ -265,6 +265,13 @@ def _current_month_start() -> datetime:
     return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
+def current_month_start() -> datetime:
+    """Public wrapper over _current_month_start(), for callers outside this
+    module that need the same month boundary (e.g. the get_transactions
+    agent tool) without duplicating the boundary logic."""
+    return _current_month_start()
+
+
 def month_spend(session: Session, user_id: str, bucket: Bucket) -> int:
     """Money spent OUT of a bucket this calendar month, as a POSITIVE number.
 

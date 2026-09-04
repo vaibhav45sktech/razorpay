@@ -13,6 +13,8 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 
 from backend import config
+from backend.agent import llm_client
+from backend.api import chat as chat_routes
 from backend.api import debug as debug_routes
 from backend.api import intents as intent_routes
 from backend.api import state as state_routes
@@ -39,6 +41,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.info("Razorpay not configured yet - expected before Phase 5.")
     if config.DEBUG:
         logger.warning("DEBUG=true: /debug/* routes (fake payment settler) are ENABLED.")
+
+    # Phase 4 Step 4: a silently swapped/truncated model shows up in logs
+    # rather than as mysterious behaviour later, and the first real user
+    # request doesn't pay model-load cost. Both are best-effort and never
+    # fatal — an unreachable Ollama at startup is normal in dev/CI and is
+    # handled at request time by degraded mode, not by refusing to boot.
+    llm_client.log_model_digest()
+    llm_client.prewarm()
+
     yield
     logger.info("CampusPool shutting down.")
 
@@ -57,6 +68,7 @@ app = FastAPI(
 
 app.include_router(state_routes.router)
 app.include_router(intent_routes.router)
+app.include_router(chat_routes.router)
 app.include_router(debug_routes.router)
 
 
