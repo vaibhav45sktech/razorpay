@@ -185,18 +185,42 @@ class GetOffersOut(ToolOutput):
 # ---------------------------------------------------------------------------
 
 
+# Shared field descriptions for the two model-visible money-shaped tools.
+# Written for a 7B model reading them as prompt text (see agent/prompts.py
+# render_tool_catalog): the manual adversarial run on 2026-09-04 showed
+# qwen2.5:7b-instruct sending 5,000,000 paise for "₹5,000" and choosing
+# TEST_PAYOUT for a purchase when these were terser, so the descriptions now
+# spell the conversion and the action choice out explicitly.
+_ACTION_DESC = (
+    "PURCHASE = the user wants to buy or spend on something. "
+    "CONTRIBUTION = the user wants to add money to their savings."
+)
+_AMOUNT_DESC = (
+    "Amount as a positive integer number of PAISE, never rupees. "
+    "1 rupee = 100 paise, so ₹300 = 30000 and ₹5,000 = 500000."
+)
+_BUCKET_DESC = (
+    "For PURCHASE only: which bucket the money would leave. Leave null to use "
+    "discretionary. Never choose emergency_savings for spending — it is protected."
+)
+
+
 class CheckPolicyArgs(BaseModel):
+    """The model may only ask about the two actions it can also propose
+    through create_payment_intent. TEST_PAYOUT exists in policy_engine for
+    the backend-only payout path (Phase 5) and is deliberately not offered
+    here: offering it only gave the model a wrong branch to pick.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["PURCHASE", "CONTRIBUTION", "TEST_PAYOUT"] = Field(
-        ..., description="The kind of money action being proposed."
+    action: Literal["PURCHASE", "CONTRIBUTION"] = Field(..., description=_ACTION_DESC)
+    amount_paise: int = Field(..., gt=0, description=_AMOUNT_DESC)
+    purpose: str = Field(
+        ..., min_length=1,
+        description="Short structured purpose, e.g. 'purchase:laptop_bag' or 'savings_goal:gol_abc'.",
     )
-    amount_paise: int = Field(..., gt=0, description="Positive integer paise.")
-    purpose: str = Field(..., min_length=1, description="Structured purpose, e.g. 'purchase:off_xyz'.")
-    bucket: Literal["emergency_savings", "discretionary", "rewards"] | None = Field(
-        None,
-        description="For PURCHASE: which bucket the money would leave. Defaults to discretionary.",
-    )
+    bucket: Literal["emergency_savings", "discretionary", "rewards"] | None = Field(None, description=_BUCKET_DESC)
 
 
 class CheckPolicyOut(ToolOutput):
@@ -223,15 +247,14 @@ class CreateIntentArgs(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["PURCHASE", "CONTRIBUTION"] = Field(
-        ..., description="The kind of money action to propose."
+    action: Literal["PURCHASE", "CONTRIBUTION"] = Field(..., description=_ACTION_DESC)
+    amount_paise: int = Field(..., gt=0, description=_AMOUNT_DESC)
+    purpose: str = Field(
+        ..., min_length=1,
+        description="Short structured purpose, e.g. 'purchase:laptop_bag' or 'savings_goal:gol_abc'. "
+        "Use the SAME purpose you passed to check_policy.",
     )
-    amount_paise: int = Field(..., gt=0, description="Positive integer paise.")
-    purpose: str = Field(..., min_length=1, description="Structured purpose, e.g. 'savings_goal:gol_abc'.")
-    bucket: Literal["emergency_savings", "discretionary", "rewards"] | None = Field(
-        None,
-        description="For PURCHASE: which bucket the money would leave. Defaults to discretionary.",
-    )
+    bucket: Literal["emergency_savings", "discretionary", "rewards"] | None = Field(None, description=_BUCKET_DESC)
 
 
 class CreateIntentOut(ToolOutput):
