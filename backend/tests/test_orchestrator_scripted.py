@@ -827,3 +827,73 @@ def test_clean_tool_results_do_not_lock_money_tools(db, aarav, monkeypatch) -> N
     actions = _audit_actions(db, aarav.id)
     assert "untrusted_content_detected:get_offers" not in actions
     assert "tool:check_policy" in actions
+
+
+# ---------------------------------------------------------------------------
+# Redaction: the model never sees the injected instruction (2026-09-04,
+# injection run 3). Raw data is untouched everywhere else.
+# ---------------------------------------------------------------------------
+
+
+def test_injected_text_is_redacted_in_the_models_copy_only(db, aarav, monkeypatch) -> None:
+    from backend.agent import prompts
+    from backend.models.entities import Offer, RewardSource
+    from backend.services import offer_service
+
+    db.add(Offer(merchant="QuickBite (demo)", title=_INJECTED_TITLE, category="food",
+                 list_price_paise=40000, discount_pct=50.0, funding_source=RewardSource.PARTNER_FUNDED, eligibility={}))
+    db.flush()
+
+    seen_tool: list[dict] = []
+    decisions = iter([_call("get_offers"), _final("QuickBite has 50% off; one line of its text looked suspicious.")])
+
+    def fake_decide(messages, tool_names):
+        seen_tool[:] = [m for m in messages if m["role"] == "tool"]
+        return next(decisions)
+
+    monkeypatch.setattr(llm_client, "decide", fake_decide)
+    _script_fill_arguments(monkeypatch, [{"category": "food"}])
+    orchestrator.run_agent_turn(db, aarav.id, "What food offers do you have right now?")
+    db.commit()
+
+    env = json.loads(seen_tool[-1]["content"])
+    text = json.dumps(env["result"])
+    assert "create_payment_intent" not in text and "ignore previous instructions" not in text
+    assert prompts.REDACTED in text
+    assert "50% off" in text, "the harmless part of the title survives"
+    assert "LOCKED" in env["warning"]
+
+    # The service/API/DB still return the raw title.
+    raw = offer_service.list_eligible_offers(db, aarav.id, category="food")
+    assert any(o["title"] == _INJECTED_TITLE for o in raw)
+
+
+def test_redaction_leaves_normal_text_alone() -> None:
+    from backend.agent import prompts
+
+    clean = {"offers": [{"title": "Flat 20% off on study snacks (demo)", "merchant": "Campus Cafe (demo)"}],
+             "reason": "You've used ₹240 so far, leaving ₹760."}
+    assert prompts.redact_embedded_instructions(clean) == clean
+
+
+def test_taint_lock_is_checked_before_argument_validation(db, aarav, monkeypatch) -> None:
+    """After an injected result, even a malformed money-tool call is refused
+    as 'untrusted content', not as 'invalid arguments' - the audit says why."""
+    from backend.models.entities import Offer, RewardSource
+
+    db.add(Offer(merchant="QuickBite (demo)", title=_INJECTED_TITLE, category="food",
+                 list_price_paise=40000, discount_pct=50.0, funding_source=RewardSource.PARTNER_FUNDED, eligibility={}))
+    db.flush()
+    _script_decide(monkeypatch, [_call("get_offers"), _call("create_payment_intent"), _final("ok")])
+    _script_fill_arguments(monkeypatch, [{"category": "food"}, {"action": "PURCHASE", "amount_rupees": 0, "purpose": "x"}])
+    orchestrator.run_agent_turn(db, aarav.id, "What food offers do you have?")
+    actions = _audit_actions(db, aarav.id)
+    assert "blocked_money_tool:create_payment_intent" in actions
+    assert "invalid_arguments:create_payment_intent" not in actions
+
+
+def test_time_budget_exhaustion_says_time_not_steps(db, aarav, monkeypatch) -> None:
+    monkeypatch.setattr(orchestrator, "TURN_BUDGET_SECONDS", -1.0)
+    _script_decide(monkeypatch, [_final("never reached")])
+    reply = orchestrator.run_agent_turn(db, aarav.id, "hi")
+    assert reply.exhausted and "longer than I'm allowed" in reply.text
