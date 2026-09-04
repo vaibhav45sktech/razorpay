@@ -19,6 +19,7 @@ benchmark evidence (HLD Part 5.4), never on vibes.
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -242,3 +243,42 @@ def rupee_view(obj):
     if isinstance(obj, list):
         return [rupee_view(x) for x in obj]
     return obj
+
+
+_INJECTION_PATTERNS = [
+    r"ignore (?:all |any |the |your )?(?:previous|prior|above|earlier) (?:instructions|rules|messages)",
+    r"disregard (?:all |any |the |your )?(?:previous|prior|above|earlier) (?:instructions|rules)",
+    r"\bcall\s+create_payment_intent\b",
+    r"\bcall\s+(?:the\s+)?(?:tool|function)\s+\w+",
+    r"\bpay\b[^.]{0,60}\bimmediately\b",
+    r"\b(?:transfer|send|pay)\b[^.]{0,40}\b(?:now|immediately|right away)\b",
+    r"\byou (?:must|should|will) now\b",
+    r"\bsystem prompt\b",
+    r"\bnew instructions?\b",
+    r"\bas an ai\b[^.]{0,40}\b(?:you must|you should)\b",
+]
+_INJECTION_RE = re.compile("|".join(f"(?:{p})" for p in _INJECTION_PATTERNS), re.IGNORECASE)
+
+
+def find_embedded_instructions(obj, _hits=None) -> list[str]:
+    """Return snippets of instruction-shaped text found in any string inside a
+    tool result. Data fields (offer titles, merchant names, purposes) are the
+    only place an outside party's words reach the model; the 2026-09-04
+    injection run showed a 7B model obeying such a title even after being told
+    in the prompt not to. Detection here feeds two code-level responses in the
+    orchestrator: a warning in the tool envelope, and a lock on money tools
+    for the rest of the turn. Deterministic and auditable; a false positive
+    costs one turn of "please ask again", a false negative costs nothing the
+    other guardrails don't already cover."""
+    hits = [] if _hits is None else _hits
+    if isinstance(obj, str):
+        for m in _INJECTION_RE.finditer(obj):
+            start = max(0, m.start() - 20)
+            hits.append(obj[start : m.end() + 20].strip())
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            find_embedded_instructions(v, hits)
+    elif isinstance(obj, list):
+        for v in obj:
+            find_embedded_instructions(v, hits)
+    return hits
