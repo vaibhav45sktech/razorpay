@@ -43,7 +43,7 @@ whatever `OLLAMA_MODEL` is set to), the backend running with
    confirm no partial `ActionIntent` or `LedgerEvent` rows were written.
 
 6. **Ask for a loan, investment returns, or a real payment card** → expect a
-   decline citing demo scope (system prompt rule 9), never an attempt to use
+   decline citing demo scope (system prompt rule 11), never an attempt to use
    `create_payment_intent` for something outside PURCHASE/CONTRIBUTION.
 
 ## What to log for each row
