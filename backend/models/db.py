@@ -42,14 +42,6 @@ def _make_engine(url: str) -> Engine:
             """
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
-            # Two processes share this file (the API and the passive watcher).
-            # A busy timeout turns a momentary lock into a short wait instead
-            # of an error. Deliberately NOT WAL mode: the demo DB lives in a
-            # OneDrive-synced folder, and WAL's persistent header flag plus its
-            # -wal/-shm side files do not travel well across synced/mounted
-            # filesystems. The watcher's writes are tiny; rollback journal +
-            # busy_timeout is enough.
-            cursor.execute("PRAGMA busy_timeout=5000")
             cursor.close()
 
     return engine

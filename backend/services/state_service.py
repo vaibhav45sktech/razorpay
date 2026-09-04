@@ -79,10 +79,6 @@ def get_state(session: Session, user_id: str) -> dict[str, Any]:
         "pending_actions": pending,
         "pool": pool_service.cycle_summary(session, user_id),
         "rewards": reward_service.list_for_user(session, user_id),
-        # Passive watcher output (backend/watcher): advisory text + the facts
-        # it came from. Shown to the UI and the chat agent alike; neither can
-        # act on it directly.
-        "suggestions": _active_suggestions(session, user_id),
         "recent_events": [
             {"event_id": e.id, "type": e.type.value, "amount_paise": e.amount_paise,
              "bucket": e.bucket.value, "source": e.source, "at": e.created_at.isoformat()}
@@ -90,18 +86,3 @@ def get_state(session: Session, user_id: str) -> dict[str, Any]:
         ],
         "demo_notice": "ALL DATA IS SYNTHETIC. Payments run in Razorpay Test Mode only.",
     }
-
-
-def _active_suggestions(session: Session, user_id: str, limit: int = 3) -> list[dict[str, Any]]:
-    from backend.models.entities import Suggestion  # local import: keeps entities the only hard dependency
-    rows = session.execute(
-        select(Suggestion)
-        .where(Suggestion.user_id == user_id, Suggestion.dismissed_at.is_(None))
-        .order_by(Suggestion.created_at.desc())
-        .limit(limit)
-    ).scalars().all()
-    return [
-        {"suggestion_id": r.id, "kind": r.kind, "text": r.text, "created_at": r.created_at.isoformat(),
-         "advisory": True}
-        for r in rows
-    ]

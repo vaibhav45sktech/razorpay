@@ -48,7 +48,6 @@ from backend.models.entities import (
     RewardSource,
     RewardStatus,
     SpendPolicy,
-    Suggestion,
     User,
 )
 from backend.services import ledger_service
@@ -69,7 +68,6 @@ POOL_CONTRIBUTION_PAISE = 500 * RUPEE      # PRD s4.1
 
 # Tables cleared by --reset, in FK-safe order (children before parents).
 _RESET_ORDER = (
-    Suggestion,
     AuditEvent,
     ExceptionRecord,
     Approval,

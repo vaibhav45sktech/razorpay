@@ -185,9 +185,6 @@ def render_state_summary(state: dict) -> str:
             f"({g.get('pct_complete')}% complete)"
         )
 
-    for sug in (state.get("suggestions") or [])[:2]:
-        lines.append(f"Recent app suggestion (advisory only, already shown to the user): {sug.get('text')}")
-
     pending = state.get("pending_actions") or []
     if pending:
         lines.append(f"{len(pending)} pending money action(s) awaiting the user's decision in the app")

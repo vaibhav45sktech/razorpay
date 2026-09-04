@@ -182,9 +182,7 @@ _transport: httpx.BaseTransport | None = None
 # ---------------------------------------------------------------------------
 
 
-def _post_stream(
-    messages: list[dict], fmt: dict[str, Any] | str, *, temperature: float = 0.1, model: str | None = None
-) -> str:
+def _post_stream(messages: list[dict], fmt: dict[str, Any] | str, *, temperature: float = 0.1) -> str:
     """POST /api/chat with stream=True and a `format` constraint; return the
     concatenated message content once the stream completes.
 
@@ -196,7 +194,7 @@ def _post_stream(
 
     url = f"{config.OLLAMA_URL}/api/chat"
     payload = {
-        "model": model or config.OLLAMA_MODEL,
+        "model": config.OLLAMA_MODEL,
         "messages": messages,
         "format": fmt,
         "stream": True,
@@ -257,14 +255,12 @@ def _post_stream(
     return "".join(content_parts)
 
 
-def _chat_json(
-    messages: list[dict], fmt: dict[str, Any] | str, *, temperature: float = 0.1, model: str | None = None
-) -> Any:
+def _chat_json(messages: list[dict], fmt: dict[str, Any] | str, *, temperature: float = 0.1) -> Any:
     """One format-constrained call, parsed as JSON. Retries exactly once with
     a corrective instruction if the content doesn't parse — grammar-
     constrained decoding should make this rare, but small local models have
     been observed truncating output or wrapping it in stray text."""
-    raw = _post_stream(messages, fmt, temperature=temperature, model=model)
+    raw = _post_stream(messages, fmt, temperature=temperature)
     try:
         return json.loads(raw)
     except (json.JSONDecodeError, TypeError):
@@ -279,7 +275,7 @@ def _chat_json(
                 ),
             },
         ]
-        raw2 = _post_stream(corrective, fmt, temperature=temperature, model=model)
+        raw2 = _post_stream(corrective, fmt, temperature=temperature)
         try:
             return json.loads(raw2)
         except (json.JSONDecodeError, TypeError) as exc:
@@ -310,15 +306,6 @@ def fill_arguments(messages: list[dict], args_json_schema: dict[str, Any]) -> di
     if not isinstance(obj, dict):
         raise LLMMalformedOutput(f"expected a JSON object of tool arguments, got: {obj!r}")
     return obj
-
-
-def chat_json(
-    messages: list[dict], fmt: dict[str, Any] | str, *, temperature: float = 0.1, model: str | None = None
-) -> Any:
-    """Public format-constrained call for callers other than the orchestrator
-    (the passive watcher). Same transport, timeouts and circuit breaker as
-    the agent; `model` lets the watcher use its smaller model."""
-    return _chat_json(messages, fmt, temperature=temperature, model=model)
 
 
 def prewarm() -> None:

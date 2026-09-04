@@ -633,47 +633,6 @@ class AuditEvent(Base):
         return f"<AuditEvent seq={self.seq} {self.actor.value} {self.action!r}>"
 
 
-class Suggestion(Base):
-    """A passive, ADVISORY nudge produced by the background watcher
-    (backend/watcher) from verified ledger state.
-
-    The whole point of this table is what it cannot do: a suggestion is text
-    plus the facts it was derived from. Nothing reads it to decide anything;
-    no tool consumes it; it cannot create an intent or touch the ledger. The
-    facts are computed by deterministic rules in code; the model (a small one)
-    only phrases them, and a templated fallback phrases them when the model is
-    unavailable. `phrased_by` records which, so a demo can show both.
-    """
-
-    __tablename__ = "suggestions"
-    __table_args__ = (Index("ix_suggestion_user_created", "user_id", "created_at"),)
-
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("sug"))
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
-
-    #: Rule name, e.g. "spend_pace", "large_purchase", "savings_nudge".
-    kind: Mapped[str] = mapped_column(String(40), nullable=False)
-    #: Dedup key within a kind, e.g. the ledger event id or "2026-09" for a month.
-    dedup_key: Mapped[str] = mapped_column(String(80), nullable=False)
-
-    #: The deterministic facts the text was written from — the audit answer to
-    #: "why did it say that?" without needing the model at all.
-    facts: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    text: Mapped[str] = mapped_column(String(400), nullable=False)
-    #: "llm:<model>" or "template".
-    phrased_by: Mapped[str] = mapped_column(String(80), nullable=False)
-
-    #: Ledger event that triggered it, when there was one.
-    source_event_id: Mapped[str | None] = mapped_column(ForeignKey("ledger_events.id"), nullable=True)
-
-    is_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
-    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-    def __repr__(self) -> str:
-        return f"<Suggestion {self.id} {self.kind} {self.text[:40]!r}>"
-
-
 class ExceptionRecord(Base):
     """An ambiguous or unsupported situation, surfaced instead of guessed.
 
