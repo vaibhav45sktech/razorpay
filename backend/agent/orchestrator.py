@@ -89,6 +89,20 @@ def _is_parrot(reply: str, user_message: str) -> bool:
     return bool(a) and (a == b or (len(a) > 20 and (a in b or b in a)))
 
 
+_PROMISE_RE = re.compile(
+    r"\b(let me|i(?:'ll| will)|allow me to|going to|one moment|hold on|just a (?:moment|second))\b[^.!?]{0,40}"
+    r"\b(check|look|fetch|pull|retrieve|verify|find out|get (?:that|your|the))\b",
+    re.IGNORECASE,
+)
+
+
+def _is_unkept_promise(reply: str) -> bool:
+    """A final answer that announces a lookup ("let me check your balance")
+    is only acceptable if a lookup actually happened this turn; the caller
+    checks that. This just recognises the announcement."""
+    return bool(_PROMISE_RE.search(reply))
+
+
 _EXHAUSTED_TEXT = (
     "I couldn't finish this in my step budget — nothing was executed beyond what I "
     "already reported. Please try a simpler request."
@@ -189,6 +203,7 @@ def run_agent_turn(
     #: (tool name, canonical args) -> result already returned this turn.
     calls_seen: dict[tuple[str, str], dict[str, Any]] = {}
     corrected_parrot = False
+    corrected_promise = False
 
     for step in range(MAX_STEPS):
         if time.monotonic() - started > TURN_BUDGET_SECONDS:
@@ -225,6 +240,22 @@ def run_agent_turn(
                     })
                     continue
                 reply_text = _PARROT_TEXT
+            elif _is_unkept_promise(reply_text) and not calls_seen and not corrected_promise:
+                # 2026-09-04 run, scenario 4: "I don't have your balance in
+                # memory. Let me check." — and the turn ended. A promise to
+                # check is not a check. One nudge to actually call the tool.
+                corrected_promise = True
+                audit_service.write(session, actor=AuditActor.LLM, action="unkept_promise_retry", user_id=user_id)
+                messages.append({"role": "assistant", "content": json.dumps(decision.model_dump())})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "You said you would check, but you ended your turn without calling a tool. "
+                        "Checking means calling the tool NOW: respond with action \"call_tool\" and the "
+                        "tool name. Do not tell me you will check - do it."
+                    ),
+                })
+                continue
             elif not reply_text:
                 reply_text = "I don't have anything further to add."
             audit_service.write(session, actor=AuditActor.LLM, action="chat_turn_final_answer", user_id=user_id)

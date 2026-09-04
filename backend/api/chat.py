@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from backend.agent import orchestrator
@@ -44,6 +44,13 @@ class ChatRequest(BaseModel):
     user_id: str = Field(..., min_length=1)
     message: str = Field(..., min_length=1)
     history: list[ChatHistoryMessage] = Field(default_factory=list)
+
+    @field_validator("user_id", "message", mode="before")
+    @classmethod
+    def _strip(cls, v):  # noqa: ANN001
+        # A stray space around an id ("  usr_x ") is an easy mistake for a
+        # client to make and a confusing 404 to debug (seen 2026-09-04).
+        return v.strip() if isinstance(v, str) else v
 
 
 class ChatResponse(BaseModel):

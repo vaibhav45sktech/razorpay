@@ -176,3 +176,9 @@ def test_approval_is_unreachable_through_chat_phrasing(client, seeded, monkeypat
     approve_resp = client.post(f"/api/intents/{intent_id}/approve", json={"user_id": seeded})
     assert approve_resp.status_code == 200
     assert approve_resp.json()["status"] == IntentStatus.APPROVED.value
+
+
+def test_user_id_and_message_are_trimmed(client, seeded, monkeypatch) -> None:
+    _script(monkeypatch, [ToolDecision(action="final_answer", tool_name=None, final_text="hi")])
+    resp = client.post("/api/chat", json={"user_id": f"  {seeded} ", "message": "  hello  "})
+    assert resp.status_code == 200

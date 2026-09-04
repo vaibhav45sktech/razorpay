@@ -647,3 +647,44 @@ def test_keep_alive_is_sent_to_ollama(monkeypatch) -> None:
     monkeypatch.setattr(llm_client, "_transport", httpx.MockTransport(handler))
     llm_client._post_stream([{"role": "user", "content": "hi"}], fmt="json")
     assert captured["keep_alive"] == config.OLLAMA_KEEP_ALIVE
+
+
+# ---------------------------------------------------------------------------
+# "Let me check" is not a check (2026-09-04 run, scenario 4).
+# ---------------------------------------------------------------------------
+
+
+def test_promise_to_check_without_a_tool_call_gets_one_retry(db, aarav, monkeypatch) -> None:
+    _script_decide(
+        monkeypatch,
+        [
+            _final("I don't have your balance in memory. Let me check."),
+            _call("get_wallet_or_ledger"),
+            _final("Your emergency savings are ₹1,500, not ₹10,000."),
+        ],
+    )
+    _script_fill_arguments(monkeypatch, [{}])
+    reply = orchestrator.run_agent_turn(db, aarav.id, "My balance is ₹10,000, right?")
+    db.commit()
+
+    assert reply.text.startswith("Your emergency savings are ₹1,500")
+    actions = _audit_actions(db, aarav.id)
+    assert actions.count("unkept_promise_retry") == 1
+    assert "tool:get_wallet_or_ledger" in actions
+
+
+def test_promise_after_a_real_tool_call_is_left_alone(db, aarav, monkeypatch) -> None:
+    """Once a tool has run this turn, a phrase like 'let me check' in the
+    final text is just wording, not an unkept promise."""
+    _script_decide(monkeypatch, [_call("get_wallet_or_ledger"), _final("Let me check... yes: ₹1,500 saved.")])
+    _script_fill_arguments(monkeypatch, [{}])
+    reply = orchestrator.run_agent_turn(db, aarav.id, "balance?")
+    assert reply.text.endswith("₹1,500 saved.")
+    assert "unkept_promise_retry" not in _audit_actions(db, aarav.id)
+
+
+def test_promise_detector_shapes() -> None:
+    yes = ["Let me check.", "I'll look that up for you", "One moment while I fetch your balance", "Allow me to verify that"]
+    no = ["Your balance is ₹1,500.", "I can't help with loans.", "Checked: ₹1,500."]
+    assert all(orchestrator._is_unkept_promise(t) for t in yes)
+    assert not any(orchestrator._is_unkept_promise(t) for t in no)
