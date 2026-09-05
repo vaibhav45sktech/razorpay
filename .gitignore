@@ -27,3 +27,7 @@ Thumbs.db
 
 # Scratch experiments (kept local, not part of the deliverable)
 scratch/__pycache__/
+
+# Transfer scratch: git bundles Claude writes into the working folder
+# when syncing commits from the cloud session. Never part of the deliverable.
+Claude outputs/
