@@ -297,6 +297,49 @@ def test_yes_on_a_requires_approval_rule_approves_first(client, seeded, db) -> N
     assert db.query(Approval).filter_by(intent_id=rule.intent_id).one().status is ApprovalStatus.GRANTED
 
 
+def test_yes_no_can_be_answered_from_the_rule_card_not_only_the_notification(client, seeded, db) -> None:
+    """The Card screen shows the fired rule with YES/NO on it; answering there
+    is the same structured action as answering the notification."""
+    meal = _product(db, "meal-card"); _pin(db, meal, 440)
+    rule = _rule(db, seeded, meal, 450); db.commit()
+    r = client.post(f"/api/card/{seeded}/rules/{rule.id}/respond", json={"answer": "yes"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"next": "pay", "intent_id": rule.intent_id, "status": "ALLOWED",
+                        "rule_id": rule.id, "amount_paise": 440 * RUPEE}
+    # YES only authorises; the money moves at checkout. So a student who says
+    # YES and then closes the Razorpay modal can still back out, and that NO
+    # must release the hold and the reserved limit.
+    again = client.post(f"/api/card/{seeded}/rules/{rule.id}/respond", json={"answer": "no"})
+    assert again.status_code == 200
+    db.refresh(rule)
+    assert rule.status is RuleStatus.ACTIVE and rule.intent_id is None
+    assert mas.get(db, r.json()["intent_id"]).status is S.CLOSED
+    assert mas.committed_pending_paise(db, seeded) == 0
+
+    # Once nothing is pending, there is nothing left to answer.
+    third = client.post(f"/api/card/{seeded}/rules/{rule.id}/respond", json={"answer": "yes"})
+    assert third.status_code == 400 and "no longer waiting" in third.json()["detail"]
+    assert client.post(f"/api/card/{seeded}/rules/rul_nope/respond", json={"answer": "yes"}).status_code == 404
+    assert client.post(f"/api/card/{seeded}/rules/{rule.id}/respond", json={"answer": "maybe"}).status_code == 422
+
+
+def test_state_carries_the_card_counters_for_the_bell(client, seeded, db) -> None:
+    """One poll of /api/state feeds the nav bell and the tab badge; the full
+    Card view is a separate request the Card tab makes."""
+    s = client.get(f"/api/state/{seeded}").json()["card"]
+    assert s == {"unread_notifications": 0, "rules_watching": 1, "rules_awaiting_you": 0, "rules_blocked": 0}
+    meal = _product(db, "meal-card"); _pin(db, meal, 440)
+    _rule(db, seeded, meal, 450); db.commit()
+    s = client.get(f"/api/state/{seeded}").json()["card"]
+    assert s["rules_awaiting_you"] == 1 and s["unread_notifications"] == 1 and s["rules_watching"] == 1
+
+    # The model sees the counters (so it knows to look) but never the Card view.
+    from backend.agent import prompts
+    compact = prompts.compact_state(client.get(f"/api/state/{seeded}").json())
+    assert compact["agent_card"]["rules_awaiting_you"] == 1
+    assert "products" not in compact and "rules" not in compact
+
+
 def test_no_releases_the_hold_and_the_rule_keeps_watching_under_cooldown(client, seeded, db) -> None:
     meal = _product(db, "meal-card"); _pin(db, meal, 440, stock=3)
     rule = _rule(db, seeded, meal, 450); db.commit()
@@ -434,6 +477,33 @@ def test_pinned_price_survives_ticks_and_tick_endpoint_runs_the_monitor(client, 
     assert set(t) == {"quoted", "rules_checked", "fired"} and t["quoted"] >= 11  # the pinned quote is skipped
 
 
+def test_a_rule_waiting_on_the_payment_provider_shows_no_countdown(db, seeded) -> None:
+    """Once checkout has begun, the window is meaningless: no timer may close
+    an intent the provider may already have taken money for."""
+    meal = _product(db, "meal-card"); _pin(db, meal, 440)
+    rule = _rule(db, seeded, meal, 450)
+    assert card.rule_view(db, rule)["waiting_on"] == "you"
+    assert card.rule_view(db, rule)["seconds_left"] > 0
+
+    intent = db.get(ActionIntent, rule.intent_id)
+    mas.begin_execution(db, intent, evidence={"debug": True})
+    v = card.rule_view(db, rule)
+    assert v["waiting_on"] == "payment" and v["seconds_left"] is None
+
+    mas.mark_unknown(db, intent, evidence={"debug": True})
+    assert card.rule_view(db, rule)["waiting_on"] == "reconciliation"
+
+
+def test_tick_keeps_the_price_history_bounded(db, seeded) -> None:
+    from backend.models.entities import PriceTick
+    at = datetime(2026, 9, 5, 12, 0, tzinfo=timezone.utc)
+    for i in range(140):
+        card.tick(db, now=at + timedelta(seconds=i), quote=True)
+    per_product = db.query(PriceTick).filter_by(product_id=_product(db, "meal-card").id).count()
+    assert per_product <= 96 * 2, "a rolling window per product, not an ever-growing log"
+    assert len(card.card_view(db, seeded)["products"][0]["history"]["shopkart"]) == 24
+
+
 def test_debug_levers_404_with_debug_off(client, seeded, db, monkeypatch) -> None:
     monkeypatch.setattr(config, "DEBUG", False)
     meal = _product(db, "meal-card")
@@ -466,7 +536,7 @@ def test_get_agent_card_tool_is_read_only_and_explains_a_waiting_rule(db, seeded
     from backend.agent import tool_registry
     from backend.models.schemas import NoArgs
 
-    fan = _product(db, "table fan"); _pin(db, fan, 1200)
+    fan = _product(db, "table fan"); _pin(db, fan, 1200); _pin(db, fan, 1250, platform="bazaario")
     rule = _rule(db, seeded, fan, 1000, conditions=[{"type": "min_discount_pct", "value": 30}])
     tool = tool_registry.get("get_agent_card")
     assert tool.caller is tool_registry.Caller.LLM and tool.args_json_schema().get("properties", {}) == {}

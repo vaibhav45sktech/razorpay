@@ -366,19 +366,26 @@ def mark_read(session: Session, user_id: str, *, notification_id: str | None = N
 
 
 def respond(session: Session, user_id: str, *, notification_id: str, answer: str) -> dict[str, Any]:
-    """The student's tap on a notification. YES approves (if approval is what is
-    pending) and tells the browser to open checkout; NO declines and the rule
-    goes back to watching. Structured USER action - the chat cannot do this."""
+    """The student's tap on a notification: delegates to respond_rule()."""
     n = session.get(Notification, notification_id)
     if n is None or n.user_id != user_id:
         raise LookupError(notification_id)
     n.read = True
-    if not n.intent_id or not n.rule_id:
+    if not n.rule_id:
         raise ValueError("this notification has nothing to act on")
-    rule = session.get(PurchaseRule, n.rule_id)
-    intent = mas.get(session, n.intent_id)
-    if rule is None or rule.status is not RuleStatus.AWAITING_APPROVAL:
+    return respond_rule(session, user_id, rule_id=n.rule_id, answer=answer)
+
+
+def respond_rule(session: Session, user_id: str, *, rule_id: str, answer: str) -> dict[str, Any]:
+    """YES approves (if approval is what is pending) and tells the browser to
+    open checkout; NO declines and the rule goes back to watching. Structured
+    USER action - the chat cannot do this."""
+    rule = session.get(PurchaseRule, rule_id)
+    if rule is None or rule.user_id != user_id:
+        raise LookupError(rule_id)
+    if rule.status is not RuleStatus.AWAITING_APPROVAL or not rule.intent_id:
         raise ValueError("this rule is no longer waiting for you")
+    intent = mas.get(session, rule.intent_id)
     if answer == "yes":
         if intent.status is S.AWAITING_APPROVAL:
             mas.approve(session, intent_id=intent.id, user_id=user_id)   # honours expires_at
@@ -529,11 +536,28 @@ def rule_view(session: Session, rule: PurchaseRule) -> dict[str, Any]:
         "triggered_at": rule.triggered_at.isoformat() if rule.triggered_at else None,
         "lock_expires_at": exp.isoformat() if exp else None,
         "snoozed_until": _aware(rule.snoozed_until).isoformat() if rule.snoozed_until and _aware(rule.snoozed_until) > _now() else None,
-        "seconds_left": max(0, int((exp - _now()).total_seconds())) if exp and rule.status is RuleStatus.AWAITING_APPROVAL else None,
+        "seconds_left": max(0, int((exp - _now()).total_seconds())) if exp and _waiting_on(rule, intent) == "you" else None,
+        "waiting_on": _waiting_on(rule, intent),
         "intent": None if intent is None else {"intent_id": intent.id, "status": intent.status.value,
                                                "amount_paise": intent.amount_paise, "policy": intent.policy_result},
         "result": rule.result, "created_at": rule.created_at.isoformat(),
     }
+
+
+def _waiting_on(rule: PurchaseRule, intent: ActionIntent | None) -> str | None:
+    """Who the ball is with, for a fired rule. Once checkout has begun the
+    countdown is meaningless - no timer may close an intent the provider may
+    already have taken money for, so the screen must say 'the payment is
+    being confirmed', not show 0 seconds left."""
+    if rule.status is not RuleStatus.AWAITING_APPROVAL or intent is None:
+        return None
+    if intent.status in (S.AWAITING_APPROVAL, S.ALLOWED, S.APPROVED):
+        return "you"
+    if intent.status in (S.EXECUTING, S.SUCCESS, S.VERIFIED):
+        return "payment"
+    if intent.status in (S.UNKNOWN, S.EXCEPTION):
+        return "reconciliation"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -747,10 +771,35 @@ def _follow_up(session: Session, rule: PurchaseRule, *, now: datetime) -> None:
     # EXECUTING / UNKNOWN / EXCEPTION: checkout or reconciliation is in charge; leave it.
 
 
+def _trim_ticks(session: Session, *, keep_per_product: int = _HISTORY_POINTS * 4) -> int:
+    """Ticks exist to draw a sparkline and to evidence a fired rule, not as a
+    permanent record - the ledger and the audit trail are that. At one pass
+    every 20 s an all-day demo would otherwise accumulate tens of thousands of
+    rows in the SQLite file, so keep a rolling window per product."""
+    cutoff_ids: list[str] = []
+    for (pid,) in session.execute(select(WatchedProduct.id)).all():
+        keep = session.execute(
+            select(PriceTick.id).where(PriceTick.product_id == pid)
+            .order_by(PriceTick.observed_at.desc(), PriceTick.id.desc()).limit(keep_per_product)
+        ).scalars().all()
+        if len(keep) < keep_per_product:
+            continue
+        cutoff_ids += session.execute(
+            select(PriceTick.id).where(PriceTick.product_id == pid, PriceTick.id.not_in(keep))
+        ).scalars().all()
+    for tid in cutoff_ids:
+        session.delete(session.get(PriceTick, tid))
+    if cutoff_ids:
+        session.flush()
+    return len(cutoff_ids)
+
+
 def tick(session: Session, *, now: datetime | None = None, quote: bool = True) -> dict[str, int]:
     """One pass of the monitor. Safe to call as often as you like."""
     now = now or _now()
     quoted = quote_all(session, at=now) if quote else 0
+    if quoted:
+        _trim_ticks(session)
     fired = 0
     rules = session.execute(
         select(PurchaseRule).where(PurchaseRule.status.in_([RuleStatus.ACTIVE, RuleStatus.AWAITING_APPROVAL]))

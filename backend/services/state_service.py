@@ -16,11 +16,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend import config
-from backend.models.entities import Bucket, Goal, GoalStatus, User
+from backend.models.entities import Bucket, Goal, GoalStatus, Notification, PurchaseRule, RuleStatus, User
 from backend.services import ledger_service, money_action_service, pool_service, reward_service
 
 
@@ -79,6 +79,27 @@ def get_state(session: Session, user_id: str) -> dict[str, Any]:
             "paused": policy.paused,
         },
         "pending_actions": pending,
+        # Agentic Card (Phase 6b): just the counters the nav bell and the tab
+        # badge need on every poll. The Card screen reads the full view from
+        # /api/card/{user_id}; this keeps the common case one request.
+        "card": {
+            "unread_notifications": int(session.execute(
+                select(func.count(Notification.id)).where(
+                    Notification.user_id == user_id, Notification.read.is_(False))
+            ).scalar_one()),
+            "rules_watching": int(session.execute(
+                select(func.count(PurchaseRule.id)).where(
+                    PurchaseRule.user_id == user_id, PurchaseRule.status == RuleStatus.ACTIVE)
+            ).scalar_one()),
+            "rules_awaiting_you": int(session.execute(
+                select(func.count(PurchaseRule.id)).where(
+                    PurchaseRule.user_id == user_id, PurchaseRule.status == RuleStatus.AWAITING_APPROVAL)
+            ).scalar_one()),
+            "rules_blocked": int(session.execute(
+                select(func.count(PurchaseRule.id)).where(
+                    PurchaseRule.user_id == user_id, PurchaseRule.status == RuleStatus.BLOCKED)
+            ).scalar_one()),
+        },
         "pool": pool_service.cycle_summary(session, user_id),
         "rewards": reward_service.list_for_user(session, user_id),
         "recent_events": [

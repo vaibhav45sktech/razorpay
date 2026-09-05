@@ -348,5 +348,9 @@ def compact_state(state: dict) -> dict:
         "eligible": sum(1 for r in rewards if r.get("status") in ("eligible", "ELIGIBLE")),
     }
     keep["recent_events_count"] = len(state.get("recent_events") or [])
+    # Four counters, not the Card view: enough for the model to KNOW a rule is
+    # waiting or blocked (and so to call get_agent_card), never enough to
+    # describe one from the prompt alone.
+    keep["agent_card"] = state.get("card")
     keep["demo_notice"] = state.get("demo_notice")
     return keep

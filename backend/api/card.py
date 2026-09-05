@@ -11,6 +11,7 @@ Razorpay test checkout (or, in DEBUG auto mode, a simulated settlement).
   GET    /api/card/products                           synthetic catalogue + quotes
   POST   /api/card/{user_id}/rules                    create a purchase rule
   DELETE /api/card/{user_id}/rules/{rule_id}          cancel one
+  POST   /api/card/{user_id}/rules/{rule_id}/respond  {"answer": "yes"|"no"} from the rule card
   POST   /api/card/{user_id}/rules/{rule_id}/resume   BLOCKED -> ACTIVE
   GET    /api/card/{user_id}/notifications
   POST   /api/card/{user_id}/notifications/read       mark all (or one) read
@@ -124,6 +125,12 @@ def create_rule(user_id: str, body: RuleBody, session: Session = Depends(get_ses
 @router.delete("/{user_id}/rules/{rule_id}")
 def cancel_rule(user_id: str, rule_id: str, session: Session = Depends(get_session)) -> dict:
     return _run(session, lambda: card.cancel_rule(session, user_id, rule_id), write=True)
+
+
+@router.post("/{user_id}/rules/{rule_id}/respond")
+def respond_rule(user_id: str, rule_id: str, body: RespondBody, session: Session = Depends(get_session)) -> dict:
+    """YES / NO straight from the rule card (same action as answering the notification)."""
+    return _run(session, lambda: card.respond_rule(session, user_id, rule_id=rule_id, answer=body.answer), write=True)
 
 
 @router.post("/{user_id}/rules/{rule_id}/resume")
