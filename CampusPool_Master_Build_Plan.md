@@ -555,6 +555,14 @@ Part A.2, plus two specific to this phase:
 4. Prepare the compliance answer (Production Readiness §7) — you'll likely be asked.
 5. Have the failure demos ready: the denied purchase, the tampered audit row, the contained prompt injection. **Deliberate failures land better than a flawless happy path**, because they prove the guardrails are real.
 
+### Phase 9 — done *(2026-09-05)*
+
+1. **Hygiene, verified rather than asserted.** No key-shaped `rzp_live_…` in any tracked file; `.env` absent from the index and from `git log --all --full-history`; the `rzp_test_` startup guard present; 12 synthetic/Test-Mode labels in the UI copy; `/debug/*` gated by `require_debug`. All five are now CI steps too (Phase 8 item 5), so this stops being a thing a human has to remember.
+2. **README rewritten.** It was still claiming "Phase 4 — next". Now: the claim and its evidence (the §6.1 table and the frozen digest), what the product does, the architecture in four properties, how to run it, the five-minute demo, the doc map, the API table, honest build status — and a **limitations** section that names `/api/chat`'s ceiling, the deliberate chat-cannot-create-approval-needed narrowing, `create_all` instead of migrations, and that the hash chain makes tampering detectable rather than impossible. A prototype that hides those is worth less than one that names them.
+3. **`docs/demo_script.md`** — the timed run, shaped as two minutes of "it works" and three of "it cannot be talked out of the rules", because the refusals are the demo. Includes the cold-model warm-up (a 20 s silence on the first inference is the most common way this demo dies), what to say verbatim, a reserve section for the five questions that actually get asked, and what to do when something breaks mid-demo. **Still to do by hand: rehearse it twice on the demo machine, timed.** That is not something this repo can do for you.
+4. **`docs/compliance.md`** — the four claims (SAQ A scope; no DPDP gap today plus the retention/purpose design; a hash chain that makes forgery non-silent; and the BUDS Act / Chit Funds Act exposure the simulated pool exists to avoid), each with the reasoning, the limitation stated out loud, and the deferred items with their trigger conditions.
+5. **Failure demos ready** and each one already covered by a test, so the demo cannot claim something the suite does not: the denied purchase, the five escalating denials, the contained injection, the blocked card rule, the forged audit row, and the model-down degradation.
+
 **Tag:** `v1.0-mvp`.
 
 ---
