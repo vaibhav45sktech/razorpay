@@ -653,6 +653,25 @@ class WebhookEvent(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
 
+class Need(Base):
+    """An upcoming expense the user tells us about ("exam fees, January,
+    ₹3,000"). Input to the Autopilot's draw-round recommendation and to offer
+    matching. Plain data entered by the user through a form - never inferred
+    by the model - so the recommendation built on it is deterministic."""
+
+    __tablename__ = "needs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("nd"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    #: "YYYY-MM"
+    month: Mapped[str] = mapped_column(String(7), nullable=False)
+    amount_paise: Mapped[int] = mapped_column(Integer, nullable=False)
+    category: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
 class ExceptionRecord(Base):
     """An ambiguous or unsupported situation, surfaced instead of guessed.
 

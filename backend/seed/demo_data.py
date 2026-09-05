@@ -40,6 +40,7 @@ from backend.models.entities import (
     Goal,
     LedgerEvent,
     LedgerEventType,
+    Need,
     Offer,
     PoolAllocation,
     PoolCycle,
@@ -69,6 +70,7 @@ POOL_CONTRIBUTION_PAISE = 500 * RUPEE      # PRD s4.1
 
 # Tables cleared by --reset, in FK-safe order (children before parents).
 _RESET_ORDER = (
+    Need,
     WebhookEvent,
     AuditEvent,
     ExceptionRecord,
