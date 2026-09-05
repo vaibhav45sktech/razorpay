@@ -89,7 +89,7 @@
       case "gloss": return new THREE.MeshPhysicalMaterial({ ...common, roughness: .08, metalness: .05, clearcoat: 1, clearcoatRoughness: .05 });
       case "chrome": return new THREE.MeshStandardMaterial({ ...common, roughness: .18, metalness: .85 });
       case "speckled": return new THREE.MeshPhysicalMaterial({ ...common, roughness: .35, metalness: .05, clearcoat: .6, clearcoatRoughness: .3 });
-      default: return new THREE.MeshPhysicalMaterial({ ...common, roughness: .42, metalness: 0, clearcoat: .35, clearcoatRoughness: .4, sheen: .4, sheenColor: new THREE.Color("#ffffff") });
+      default: return new THREE.MeshPhysicalMaterial({ ...common, roughness: .42, metalness: 0, clearcoat: .35, clearcoatRoughness: .4 });
     }
   }
   const group = new THREE.Group(); scene.add(group);
