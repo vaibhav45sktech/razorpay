@@ -18,6 +18,7 @@ from backend.agent import llm_client
 from backend.api import chat as chat_routes
 from backend.api import checkout as checkout_routes
 from backend.api import autopilot as autopilot_routes
+from backend.api import card as card_routes
 from backend.api import debug as debug_routes
 from backend.api import intents as intent_routes
 from backend.api import state as state_routes
@@ -67,7 +68,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         if not config.RAZORPAY_WEBHOOK_SECRET:
             logger.warning("RAZORPAY_WEBHOOK_SECRET is not set: every webhook will be rejected (400) until it is.")
 
+    # Phase 6b: the Agentic Card price monitor. Deterministic code over a
+    # synthetic feed; re-quotes prices and re-evaluates every purchase rule.
+    monitor = asyncio.create_task(_card_monitor_loop())
+    logger.info("Agentic Card monitor started (every %ss).", config.PRICE_TICK_SECONDS)
+
     yield
+    monitor.cancel()
     if sweeper is not None:
         sweeper.cancel()
     logger.info("CampusPool shutting down.")
@@ -89,6 +96,22 @@ async def _sweeper_loop() -> None:
             logger.exception("sweeper pass failed; will retry")
 
 
+async def _card_monitor_loop() -> None:
+    from backend.services import agent_card_service
+
+    while True:
+        await asyncio.sleep(config.PRICE_TICK_SECONDS)
+        try:
+            with database.session_scope() as session:
+                report = await asyncio.to_thread(agent_card_service.tick, session)
+            if report.get("fired"):
+                logger.info("card monitor: %s", report)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a background loop must survive and say why
+            logger.exception("card monitor pass failed; will retry")
+
+
 app = FastAPI(
     title="CampusPool API",
     description=(
@@ -108,6 +131,7 @@ app.include_router(checkout_routes.router)
 app.include_router(webhook_routes.router)
 app.include_router(ui_data_routes.router)
 app.include_router(autopilot_routes.router)
+app.include_router(card_routes.router)
 app.include_router(ui_routes.router)
 app.include_router(debug_routes.router)
 

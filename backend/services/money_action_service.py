@@ -20,10 +20,11 @@ STATE MACHINE (PRD s5.5 / HLD s2.5)
                             +-> EXCEPTION -+-> VERIFIED ...    (human review resolved it)
                                            +-> CLOSED
 
-Two completions of the HLD table, both noted here so they are not mistaken for
+Three completions of the HLD table, all noted here so they are not mistaken for
 drift: UNKNOWN -> FAILURE (reconciliation can discover a failure, not only a
-success) and EXCEPTION -> VERIFIED | CLOSED (the exception queue must have a
-way out once a human decides).
+success), EXCEPTION -> VERIFIED | CLOSED (the exception queue must have a way
+out once a human decides), and ALLOWED | APPROVED -> CLOSED (an authorised
+intent whose approval window lapsed before execution; Phase 6b Agentic Card).
 
 IDEMPOTENCY (Guardrail 4, PRD s9 case D "Pay Rs.800 again")
     A deterministic base_ref = hash(user | purpose | amount | period) identifies
@@ -99,8 +100,11 @@ LEGAL: dict[IntentStatus, frozenset[IntentStatus]] = {
     S.DENIED: frozenset({S.CLOSED}),
     S.NEEDS_APPROVAL: frozenset({S.AWAITING_APPROVAL}),
     S.AWAITING_APPROVAL: frozenset({S.APPROVED, S.CLOSED}),
-    S.APPROVED: frozenset({S.EXECUTING}),
-    S.ALLOWED: frozenset({S.EXECUTING}),
+    # ALLOWED/APPROVED -> CLOSED: an authorised intent the user never executed
+    # within its window (Agentic Card approval window, Phase 6b). Closing it
+    # releases the limit it reserved. Nothing else may reach EXECUTING.
+    S.APPROVED: frozenset({S.EXECUTING, S.CLOSED}),
+    S.ALLOWED: frozenset({S.EXECUTING, S.CLOSED}),
     S.EXECUTING: frozenset({S.SUCCESS, S.FAILURE, S.UNKNOWN}),
     S.SUCCESS: frozenset({S.VERIFIED}),
     S.VERIFIED: frozenset({S.LEDGER_UPDATED}),
@@ -427,6 +431,35 @@ def deny_approval(session: Session, *, intent_id: str, user_id: str) -> ActionIn
     transition(session, intent, S.CLOSED, evidence={"approval_id": approval.id, "approval": "denied"},
                actor=AuditActor.USER)
     return intent
+
+
+def set_approval_window(session: Session, intent: ActionIntent, *, seconds: int) -> None:
+    """Give an AWAITING_APPROVAL intent a deadline. approve() already honours
+    Approval.expires_at; this is the first caller that sets it (Agentic Card
+    rules carry their own window)."""
+    if intent.status is S.AWAITING_APPROVAL:
+        row = _approval_row(session, intent)
+        row.expires_at = datetime.now(timezone.utc) + timedelta(seconds=max(1, seconds))
+        session.flush()
+
+
+def expire_unexecuted(session: Session, intent: ActionIntent, *, reason: str) -> ActionIntent:
+    """Close an intent whose window ran out before anyone executed it.
+
+    AWAITING_APPROVAL -> CLOSED (approval marked EXPIRED), ALLOWED/APPROVED ->
+    CLOSED. Anything already EXECUTING or beyond is left alone: the provider
+    may have the money, and reconciliation - not a timer - decides that.
+    """
+    if intent.status is S.AWAITING_APPROVAL:
+        row = _approval_row(session, intent)
+        row.status = ApprovalStatus.EXPIRED
+        row.decided_at = datetime.now(timezone.utc)
+        return transition(session, intent, S.CLOSED, evidence={"approval": "expired", "reason": reason},
+                          actor=AuditActor.SYSTEM)
+    if intent.status in (S.ALLOWED, S.APPROVED):
+        return transition(session, intent, S.CLOSED, evidence={"expired": True, "reason": reason},
+                          actor=AuditActor.SYSTEM)
+    raise IllegalTransition(intent.id, intent.status, S.CLOSED)
 
 
 # ---------------------------------------------------------------------------

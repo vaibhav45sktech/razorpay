@@ -83,7 +83,19 @@ WRITE_TOOL_REQUESTS: dict[str, dict[str, tuple[str, ...]]] = {
 #: provenance check (Guardrail 3). check_policy is read-only, but letting the
 #: model probe amounts the user never said is how "you can contribute ₹500!"
 #: replies to a ₹5,000 purchase request were born (2026-09-04, scenario 2).
-AMOUNT_TOOLS: frozenset[str] = MONEY_TOOLS | frozenset({"check_policy"})
+AMOUNT_TOOLS: frozenset[str] = MONEY_TOOLS | frozenset({"check_policy", "create_purchase_rule"})
+
+#: Phase 6b: a purchase RULE is not money, but it is a standing instruction to
+#: buy, so it gets the same three checks a money tool gets - the taint lock
+#: (no rule from a turn that saw injected text), amount provenance (the target
+#: price must be one the user typed) and write provenance (the user must have
+#: asked, in their own words, to watch/track/auto-buy something).
+RULE_TOOLS: frozenset[str] = frozenset({"create_purchase_rule"})
+RULE_REQUEST_WORDS: tuple[str, ...] = (
+    "watch", "track", "auto-buy", "autobuy", "auto buy", "when it drops", "when the price", "if it drops",
+    "if the price", "buy it when", "buy when", "set a rule", "alert me", "notify me", "falls to", "drops to",
+    "goes below", "under ₹", "below ₹",
+)
 
 _UNAVAILABLE_TEXT = (
     "The assistant is temporarily unavailable, so I can't chat right now — "
@@ -423,7 +435,7 @@ def execute_tool(
     # and retry from, not a crash. user_id is never part of `raw_args` at
     # all — it is a separate parameter here and in every handler signature,
     # injected by the caller from the session, never accepted from the model.
-    if tool.name in MONEY_TOOLS and money_locked_reason is not None:
+    if tool.name in (MONEY_TOOLS | RULE_TOOLS) and money_locked_reason is not None:
         # Guardrail 4 — taint lock: instruction-shaped text was found in a
         # tool result earlier this turn (prompts.find_embedded_instructions),
         # so no money tool may run until the user speaks again. Checked before
@@ -495,6 +507,23 @@ def execute_tool(
                 "blocked": True, "decision": "BLOCKED", "reason": verdict["reason"],
                 "hint": "Only call this tool when the user explicitly asks for that change. Answer the user's actual question.",
             }
+
+    if tool.name in RULE_TOOLS and not any(w in user_said for w in RULE_REQUEST_WORDS):
+        verdict = {
+            "decision": "BLOCKED",
+            "rule": "rule_not_requested_by_user",
+            "reason": "The user did not ask to watch, track or auto-buy anything in this conversation. "
+                      "The agent may not set a standing purchase rule on its own initiative.",
+            "details": {"tool": tool.name, "expected_one_of": list(RULE_REQUEST_WORDS)},
+        }
+        audit_service.write(
+            session, actor=AuditActor.LLM, action=f"blocked_unrequested_write:{tool.name}", user_id=user_id,
+            inputs=raw_args, policy_result=verdict,
+        )
+        return {
+            "blocked": True, "decision": "BLOCKED", "reason": verdict["reason"],
+            "hint": "Only create a rule when the user explicitly asks to watch or auto-buy something. Answer their actual question.",
+        }
 
     if tool.name in AMOUNT_TOOLS:
         amount_paise = getattr(parsed, "amount_paise")

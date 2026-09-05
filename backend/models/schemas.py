@@ -157,6 +157,63 @@ class GetAutopilotPlanOut(ToolOutput):
 
 
 # ---------------------------------------------------------------------------
+# get_agent_card / create_purchase_rule (Phase 6b Agentic Card)
+# ---------------------------------------------------------------------------
+
+
+class GetAgentCardOut(ToolOutput):
+    """The Agent Card as the model may see it: limits (= the spend policy),
+    the synthetic catalogue with current prices, the user's rules with what
+    the monitor last checked, and unread notifications. Read-only."""
+
+    card: dict[str, Any]
+    products: list[dict[str, Any]]
+    rules: list[dict[str, Any]]
+    unread_notifications: list[dict[str, Any]]
+    note: str
+
+
+class CreatePurchaseRuleArgs(BaseModel):
+    """Set a watch rule on the user's Agent Card. This creates a RULE only -
+    no purchase, no intent. When the rule later fires, the ordinary policy
+    engine decides and the user taps YES in the app; the model is not in
+    that loop. Product ids come from get_agent_card."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    product_id: str = Field(..., min_length=1, description="A product_id exactly as returned by get_agent_card.")
+    target_price_rupees: float = Field(..., gt=0, description="Buy when the price is at or below this, in rupees, exactly as the user said it.")
+    only_after_date: str | None = Field(None, description="Optional YYYY-MM-DD: do not buy before this date.")
+    min_discount_pct: float | None = Field(None, ge=0, le=100, description="Optional: only if the discount off MRP is at least this percent.")
+    approval_mode: Literal["manual", "auto"] = Field("manual", description="'manual' asks the user to tap YES when it fires (default). Use 'auto' ONLY if the user explicitly said so.")
+
+    @property
+    def target_price_paise(self) -> int:
+        return int(round(self.target_price_rupees * 100))
+
+    # The orchestrator's amount-provenance guardrail reads these two names on
+    # every AMOUNT_TOOL; aliasing keeps that check uniform.
+    @property
+    def amount_paise(self) -> int:
+        return self.target_price_paise
+
+    @property
+    def purpose(self) -> str:
+        return f"card_rule:{self.product_id}"
+
+
+class CreatePurchaseRuleOut(ToolOutput):
+    rule_id: str
+    status: str
+    product: str
+    target_price_paise: int
+    conditions: list[dict[str, Any]]
+    approval_mode: str
+    last_check: dict[str, Any] | None
+    what_happens_next: str
+
+
+# ---------------------------------------------------------------------------
 # get_eligible_rewards
 # ---------------------------------------------------------------------------
 

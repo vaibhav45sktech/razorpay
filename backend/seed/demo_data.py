@@ -41,15 +41,20 @@ from backend.models.entities import (
     LedgerEvent,
     LedgerEventType,
     Need,
+    Notification,
     Offer,
     PoolAllocation,
     PoolCycle,
     PoolCycleStatus,
+    PriceTick,
+    PurchaseRule,
     Reward,
     RewardSource,
     RewardStatus,
     SpendPolicy,
     User,
+    VirtualCard,
+    WatchedProduct,
     WebhookEvent,
 )
 from backend.services import ledger_service
@@ -70,6 +75,11 @@ POOL_CONTRIBUTION_PAISE = 500 * RUPEE      # PRD s4.1
 
 # Tables cleared by --reset, in FK-safe order (children before parents).
 _RESET_ORDER = (
+    Notification,
+    PurchaseRule,
+    PriceTick,
+    WatchedProduct,
+    VirtualCard,
     Need,
     WebhookEvent,
     AuditEvent,
@@ -371,6 +381,53 @@ def seed_pool(session: Session, users: list[User]) -> PoolCycle:
     return cycle
 
 
+def seed_agent_card(session: Session, users: list[User]) -> None:
+    """Phase 6b: the Agent Card, a SYNTHETIC product catalogue for the price
+    monitor, and one live rule so the Card screen is never empty.
+
+    Prices are student-realistic (₹600-₹10,000) so a rule can fire inside
+    the ₹1,000/month demo policy - or visibly hit it, which is the point of
+    the ₹9,999 phone. Platform names are obviously fake on purpose.
+    """
+    from backend.services import agent_card_service as card
+
+    for u in users:
+        card._card(session, u.id)   # issues the card, audited
+
+    catalogue = [
+        ("Mess meal-card top-up (synthetic)", "food", 600),
+        ("Hostel table fan (synthetic)", "home", 1_350),
+        ("Scientific calculator FX-991 (synthetic)", "education", 1_450),
+        ("Sem-4 textbook bundle (synthetic)", "education", 1_800),
+        ("Noise-cancelling headphones (synthetic)", "electronics", 2_999),
+        ("Budget smartphone (synthetic)", "electronics", 9_999),
+    ]
+    products = []
+    for name, cat, mrp in catalogue:
+        p = WatchedProduct(name=name, category=cat, list_price_paise=mrp * RUPEE, prices={})
+        session.add(p)
+        products.append(p)
+    session.flush()
+
+    # A few historical quotes so the sparklines have a shape on first load.
+    now = datetime.now(timezone.utc)
+    for i in range(8, 0, -1):
+        card.quote_all(session, at=now - timedelta(minutes=i * 5))
+
+    # Aarav watches the headphones: target ₹2,000, only after a date already
+    # past, only if ≥ 15% off. It will BLOCK on the ₹1,000 monthly cap when it
+    # fires - the demo's cue to raise the card's cap and resume.
+    aarav = users[0]
+    headphones = products[4]
+    card.create_rule(
+        session, aarav.id, product_id=headphones.id, target_price_paise=2_000 * RUPEE,
+        conditions=[{"type": "date_after", "value": (now - timedelta(days=3)).date().isoformat()},
+                    {"type": "min_discount_pct", "value": 15}],
+        approval_mode="manual",
+    )
+    logger.info("Seeded Agent Card: %d products, 1 watch rule (all synthetic)", len(products))
+
+
 # ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
@@ -392,6 +449,7 @@ def seed_all(session: Session, *, force: bool = False) -> bool:
     seed_offers(session)
     seed_rewards(session, users)
     seed_pool(session, users)
+    seed_agent_card(session, users)
     return True
 
 

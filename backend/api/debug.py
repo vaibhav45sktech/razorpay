@@ -100,6 +100,51 @@ def fake_fail(intent_id: str, session: Session = Depends(get_session)) -> dict:
     return {"intent_id": intent.id, "status": intent.status.value, "debug": True}
 
 
+class SetPriceBody(BaseModel):
+    platform: str = "shopkart"
+    price_rupees: float = Field(..., gt=0)
+    stock: int | None = Field(None, ge=0)
+    pinned: bool = True
+
+
+@router.post("/card/price/{product_id}")
+def set_price(product_id: str, body: SetPriceBody, session: Session = Depends(get_session)) -> dict:
+    """Agentic Card demo lever: put a product at a chosen price (recorded as a
+    real tick) and run the monitor once, so a rule can be watched firing."""
+    from backend.services import agent_card_service as card
+
+    try:
+        view = card.set_price(session, product_id=product_id, platform=body.platform,
+                              price_paise=int(round(body.price_rupees * 100)), stock=body.stock, pinned=body.pinned)
+        report = card.tick(session, quote=False)
+        session.commit()
+    except LookupError as exc:
+        session.rollback()
+        raise HTTPException(status_code=404, detail=f"not found: {exc}")
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"product": view, "tick": report, "debug": True}
+
+
+@router.post("/card/rules/{rule_id}/expire-now")
+def expire_rule_now(rule_id: str, session: Session = Depends(get_session)) -> dict:
+    """Collapse a fired rule's approval window to now and run the monitor, to
+    demonstrate the release path without waiting 15 minutes."""
+    from datetime import datetime, timezone
+
+    from backend.models.entities import PurchaseRule
+    from backend.services import agent_card_service as card
+
+    rule = session.get(PurchaseRule, rule_id)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="unknown rule")
+    rule.lock_expires_at = datetime.now(timezone.utc)
+    report = card.tick(session, quote=False)
+    session.commit()
+    return {"rule": card.rule_view(session, rule), "tick": report, "debug": True}
+
+
 @router.post("/intents/{intent_id}/reverse")
 def reverse(intent_id: str, reason: str = "debug reversal", session: Session = Depends(get_session)) -> dict:
     intent = _load(session, intent_id)

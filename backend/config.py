@@ -76,6 +76,20 @@ RECONCILE_EXCEPTION_AFTER_SECONDS: float = float(os.environ.get("RECONCILE_EXCEP
 
 
 # --------------------------------------------------------------------------
+# Agentic Card price monitor (Phase 6b)
+# --------------------------------------------------------------------------
+# How often the in-process monitor re-quotes the SYNTHETIC price feed and
+# re-evaluates every active purchase rule. Real platforms would be polled
+# every 30-60 min; the demo ticks fast so a rule can be watched firing.
+PRICE_TICK_SECONDS: float = float(os.environ.get("PRICE_TICK_SECONDS", "20"))
+# Default approval window once a rule fires (the doc's 15 minutes).
+CARD_APPROVAL_WINDOW_SECONDS: int = int(os.environ.get("CARD_APPROVAL_WINDOW_SECONDS", "900"))
+# After the student says NO or lets a window lapse, the rule keeps watching but
+# will not fire again for this long - a prompt every 20 s would be nagging.
+CARD_REFIRE_COOLDOWN_SECONDS: int = int(os.environ.get("CARD_REFIRE_COOLDOWN_SECONDS", "600"))
+
+
+# --------------------------------------------------------------------------
 # Local LLM (Ollama) — see HLD s2.6
 # --------------------------------------------------------------------------
 OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "http://localhost:11434")

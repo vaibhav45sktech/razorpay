@@ -672,6 +672,160 @@ class Need(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
 
+# ---------------------------------------------------------------------------
+# Agentic Card (Phase 6b) — a rule-driven purchase agent on the user's card
+#
+# The "Agent Card" is a VIRTUAL card whose authorisation rules ARE the user's
+# SpendPolicy: monthly cap = monthly_limit_paise, per-purchase cap =
+# per_tx_limit_paise, "ask me above" = approval_threshold_paise, frozen =
+# paused. No second set of limits exists to drift out of step with the policy
+# engine. The card row itself carries only identity (last4, label).
+#
+# A PurchaseRule is what the student sets: "buy <product> when the price is
+# <= ₹X, and only if <compound conditions>". A deterministic monitor (no model
+# involved) polls a SYNTHETIC price feed, evaluates rules, and when every
+# condition is met it creates a PURCHASE intent through the ordinary policy
+# engine and posts an in-app Notification. The student's tap (or, in DEBUG
+# only, an explicit auto mode) takes it from there.
+# ---------------------------------------------------------------------------
+
+
+class RuleStatus(str, enum.Enum):
+    ACTIVE = "active"                        # watching the price
+    AWAITING_APPROVAL = "awaiting_approval"  # triggered; intent open; window running
+    BLOCKED = "blocked"                      # triggered but policy denied; user must resume
+    DONE = "done"                            # purchased (settled to the ledger)
+    CANCELLED = "cancelled"                  # user removed it
+
+
+class ApprovalMode(str, enum.Enum):
+    MANUAL = "manual"   # notify, wait for the student's tap
+    AUTO = "auto"       # if policy says ALLOW, execute (DEBUG-only simulated settlement)
+
+
+class NotificationKind(str, enum.Enum):
+    RULE_TRIGGERED = "rule_triggered"
+    RULE_BLOCKED = "rule_blocked"
+    RULE_NEEDS_APPROVAL = "rule_needs_approval"
+    PURCHASE_DONE = "purchase_done"
+    APPROVAL_EXPIRED = "approval_expired"
+    RULE_RESUMED = "rule_resumed"
+    CARD_LIMITS_CHANGED = "card_limits_changed"
+
+
+class VirtualCard(Base):
+    """Identity of the user's Agent Card. Its LIMITS live on SpendPolicy."""
+
+    __tablename__ = "virtual_cards"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("crd"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    label: Mapped[str] = mapped_column(String(60), nullable=False, default="Agent Card")
+    #: Display only. Synthetic; never a real PAN fragment.
+    last4: Mapped[str] = mapped_column(String(4), nullable=False)
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class WatchedProduct(Base):
+    """A SYNTHETIC catalogue item the price monitor quotes. `prices` holds the
+    current quote per (fake) platform: {"shopkart": {"price_paise": .., "stock": ..}}."""
+
+    __tablename__ = "watched_products"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("prd"))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    category: Mapped[str] = mapped_column(String(60), nullable=False)
+    list_price_paise: Mapped[int] = mapped_column(Integer, nullable=False)   # MRP
+    prices: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
+class PriceTick(Base):
+    """One observation of one product on one platform. Feeds the sparkline and
+    proves what price a rule fired on."""
+
+    __tablename__ = "price_ticks"
+    __table_args__ = (Index("ix_tick_product_time", "product_id", "observed_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("tck"))
+    product_id: Mapped[str] = mapped_column(ForeignKey("watched_products.id"), nullable=False)
+    platform: Mapped[str] = mapped_column(String(40), nullable=False)
+    price_paise: Mapped[int] = mapped_column(Integer, nullable=False)
+    stock: Mapped[int] = mapped_column(Integer, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class PurchaseRule(Base):
+    """What the student asked the card to do. Evaluated by deterministic code."""
+
+    __tablename__ = "purchase_rules"
+    __table_args__ = (
+        CheckConstraint("target_price_paise > 0", name="ck_rule_target_positive"),
+        Index("ix_rule_user_status", "user_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("rul"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    product_id: Mapped[str] = mapped_column(ForeignKey("watched_products.id"), nullable=False)
+
+    target_price_paise: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: Platforms the rule may buy from; empty = any the product is listed on.
+    platforms: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    #: Compound conditions, ALL of which must hold: [{"type": "...", "value": ...}].
+    conditions: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+
+    approval_mode: Mapped[ApprovalMode] = mapped_column(
+        _str_enum(ApprovalMode, "approval_mode"), nullable=False, default=ApprovalMode.MANUAL
+    )
+    approval_window_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=900)
+
+    status: Mapped[RuleStatus] = mapped_column(
+        _str_enum(RuleStatus, "rule_status"), nullable=False, default=RuleStatus.ACTIVE
+    )
+    #: Snapshot of the last evaluation: price seen, which checks passed, why it
+    #: did or did not fire. Shown to the user so "watching" is never a black box.
+    last_eval: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    #: Set when the rule fires: the intent it created and when the window closes.
+    intent_id: Mapped[str | None] = mapped_column(ForeignKey("action_intents.id"), nullable=True, index=True)
+    triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lock_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: After a lapsed window or a NO, do not re-fire before this; keeps watching.
+    snoozed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: Outcome record once DONE: platform, price paid, simulated order id, ETA.
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
+class Notification(Base):
+    """In-app notification (the only channel for now). `actions` names what the
+    user may do from it, e.g. {"intent_id": "int_..", "rule_id": "rul_.."}."""
+
+    __tablename__ = "notifications"
+    __table_args__ = (Index("ix_notif_user_created", "user_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: new_id("ntf"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    kind: Mapped[NotificationKind] = mapped_column(_str_enum(NotificationKind, "notification_kind"), nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    rule_id: Mapped[str | None] = mapped_column(ForeignKey("purchase_rules.id"), nullable=True)
+    intent_id: Mapped[str | None] = mapped_column(ForeignKey("action_intents.id"), nullable=True)
+    actions: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
 class ExceptionRecord(Base):
     """An ambiguous or unsupported situation, surfaced instead of guessed.
 

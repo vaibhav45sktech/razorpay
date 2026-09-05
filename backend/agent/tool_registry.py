@@ -139,6 +139,32 @@ TOOLS: dict[str, ToolDef] = {
         handler=pool_tools.get_autopilot_plan,
         caller=Caller.LLM,
     ),
+    "get_agent_card": ToolDef(
+        name="get_agent_card",
+        description=(
+            "Get this user's Agent Card: its limits (monthly cap, per-purchase cap, 'ask me above' line, frozen), "
+            "the demo product catalogue with current prices, the user's purchase rules with what the price monitor "
+            "last checked and why a rule has or hasn't fired, and unread notifications. Call this for anything "
+            "about the card, a watched product, a price, or 'why hasn't it bought yet'."
+        ),
+        args_schema=s.NoArgs,
+        output_schema=s.GetAgentCardOut,
+        handler=pool_tools.get_agent_card,
+        caller=Caller.LLM,
+    ),
+    "create_purchase_rule": ToolDef(
+        name="create_purchase_rule",
+        description=(
+            "Set a watch rule on the Agent Card: buy a catalogue product when its price is at or below the "
+            "user's target, optionally only after a date or only at a minimum discount. Creates a RULE only - "
+            "no purchase, no payment. Use ONLY when the user explicitly asks to watch/track/auto-buy something "
+            "and has named the product and the target price. Get the product_id from get_agent_card first."
+        ),
+        args_schema=s.CreatePurchaseRuleArgs,
+        output_schema=s.CreatePurchaseRuleOut,
+        handler=pool_tools.create_purchase_rule,
+        caller=Caller.LLM,
+    ),
     "get_eligible_rewards": ToolDef(
         name="get_eligible_rewards",
         description=(
