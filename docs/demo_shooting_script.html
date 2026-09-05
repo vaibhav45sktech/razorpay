@@ -270,14 +270,17 @@ ollama run qwen2.5:7b-instruct "hi"</code>
     <div class="scene-head"><span class="scene-num">Scene 5</span><span class="scene-time">4:20 – 5:05</span></div>
     <h2>The record can't be forged quietly</h2>
     <div class="beat do"><span class="tag">Do</span><div class="body"><p>Switch to your terminal window.</p>
-      <pre>sqlite3 campuspool_demo.db "UPDATE audit_events SET action='intent:POLICY_CHECK->ALLOWED' WHERE seq=1;"</pre>
+      <pre>python -m scripts.tamper_demo</pre>
+      <span class="why">Prints the chain status before and after, so the break is visible in the terminal as well as the UI. Windows has no <code>sqlite3</code> command by default, and the inline <code>python -c</code> equivalent needs nested quotes PowerShell mangles — hence a script file.</span>
     </div></div>
     <div class="beat do"><span class="tag">Do</span><div class="body"><p>Switch back to the Audit trail tab and refresh. The chain pill turns red and names the row.</p></div></div>
     <div class="beat say"><span class="tag">Say</span><div class="body">
       <span class="say-line">"Each entry commits to the hash of the one before it. I just rewrote history with direct database access — the strongest attacker there is — and the system named the exact row. This doesn't make the log immutable; nothing in one database can. It makes tampering impossible to do silently."</span>
     </div></div>
     <div class="beat do"><span class="tag">Do</span><div class="body"><p>Restore it live, so it's clear this was a deliberate break, not a bug:</p>
-      <pre>python -m backend.seed.demo_data --reset</pre>
+      <pre>python -m backend.seed.demo_data --reset
+python -m scripts.tamper_demo --check</pre>
+      <span class="why">The second line re-reads the chain and prints "intact" — worth showing, because it proves the reseed genuinely repaired the record rather than the app quietly ignoring the break.</span>
     </div></div>
   </div>
 
