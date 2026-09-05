@@ -8,7 +8,7 @@ needed; only a call to these endpoints can grant it.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from backend.models.db import get_session
@@ -22,6 +22,13 @@ class ApprovalBody(BaseModel):
     # No auth in the prototype: the body names the acting user and the service
     # checks it owns the intent. A real deployment replaces this with a session.
     user_id: str = Field(..., min_length=1)
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _strip_strings(cls, v):  # noqa: ANN001
+        # Ids pasted with a stray space ("usr_x ") produced confusing 403/404s
+        # during Phase 5 manual testing; trim every string field.
+        return v.strip() if isinstance(v, str) else v
 
 
 def _handle(fn, session: Session):

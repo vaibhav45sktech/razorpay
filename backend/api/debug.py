@@ -12,7 +12,7 @@ TEMPORARY SCAFFOLDING. Phase 5 checklist: confirm these 404 with DEBUG=false.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from backend.api.deps import require_debug
@@ -30,6 +30,13 @@ class CreateIntentBody(BaseModel):
     amount_paise: int
     purpose: str
     bucket: str | None = None
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _strip_strings(cls, v):  # noqa: ANN001
+        # Ids pasted with a stray space ("usr_x ") produced confusing 403/404s
+        # during Phase 5 manual testing; trim every string field.
+        return v.strip() if isinstance(v, str) else v
 
 
 @router.post("/seed")
