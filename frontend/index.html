@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CampusPool — a savings agent that can't be talked into breaking the rules</title>
+<title>CampusHood — a savings agent that can't be talked into breaking the rules</title>
 <link rel="stylesheet" href="/app/app.css">
 <link rel="icon" href="/app/favicon.svg" type="image/svg+xml">
 </head>
@@ -14,9 +14,9 @@
 </div>
 
 <header class="nav" id="nav">
-  <a class="brand" href="#top" aria-label="CampusPool home">
+  <a class="brand" href="#top" aria-label="CampusHood home">
     <span class="brand-mark" aria-hidden="true"></span>
-    <span class="brand-name">CampusPool</span>
+    <span class="brand-name">CampusHood</span>
     <span class="brand-tag">demo</span>
   </a>
   <nav class="nav-links" aria-label="Sections">
@@ -31,7 +31,8 @@
       <span class="sr-only">Demo user</span>
       <select id="userSelect" aria-label="Choose a demo user"></select>
     </label>
-    <a class="btn btn-primary btn-sm" href="#app">Open the app</a>
+    <a class="btn btn-outline-neon btn-sm" href="#app">Log in</a>
+    <a class="btn btn-neon btn-sm" href="#app">Sign up</a>
   </div>
 </header>
 
@@ -39,27 +40,23 @@
 
 <!-- ============================== HERO ============================== -->
 <section class="hero">
-  <div class="hero-bg" aria-hidden="true">
-    <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
-    <span class="grid"></span>
-  </div>
   <div class="hero-inner">
-    <p class="eyebrow reveal">Student savings · Community pooling · Rule-bound spending</p>
-    <h1 class="reveal d1">Save first.<br>Spend within the rules.<br><span class="accent">Ask the agent anything.</span></h1>
-    <p class="lede reveal d2">
-      CampusPool is a savings assistant for students that runs on a local AI model — one that can
-      <em>propose</em> a payment, but can never move a rupee on its own. Every decision is made by
-      policy code, every payment is confirmed by Razorpay, and every step is written to a tamper-evident audit trail.
-    </p>
-    <div class="hero-ctas reveal d3">
-      <a class="btn btn-primary" href="#app">Try the demo</a>
-      <a class="btn btn-ghost" href="#trust">See the audit trail <span class="arrow">→</span></a>
+    <div class="hero-copy">
+      <p class="hero-kicker reveal"><span class="brand-mark sm" aria-hidden="true"></span><strong>CampusHood</strong> <span>Savings Pool</span></p>
+      <h1 class="hero-title reveal d1">Your first pool<br>is here</h1>
+      <p class="hero-sub reveal d2">A student savings agent that can propose, but never move, your money.<br>Explore rule-bound saving, pooling and spending now.</p>
+      <div class="hero-ctas reveal d3">
+        <a class="btn btn-white" href="#app">Learn more</a>
+      </div>
+      <dl class="hero-stats reveal d4" id="heroStats" aria-live="polite">
+        <div><dt>Emergency savings</dt><dd data-stat="emergency">—</dd></div>
+        <div><dt>Spent this month</dt><dd data-stat="spent">—</dd></div>
+        <div><dt>Audit chain</dt><dd data-stat="chain">—</dd></div>
+      </dl>
     </div>
-    <dl class="hero-stats reveal d4" id="heroStats" aria-live="polite">
-      <div><dt>Emergency savings</dt><dd data-stat="emergency">—</dd></div>
-      <div><dt>Spent this month</dt><dd data-stat="spent">—</dd></div>
-      <div><dt>Audit chain</dt><dd data-stat="chain">—</dd></div>
-    </dl>
+    <div class="hero-art" aria-hidden="true">
+      <canvas id="heroCanvas"></canvas>
+    </div>
   </div>
 </section>
 
@@ -80,7 +77,7 @@
       </div>
       <div class="chat-log" id="chatLog" aria-live="polite" aria-label="Conversation">
         <div class="msg assistant">
-          <p>Hi — I'm your CampusPool agent. I can check balances, explain your spending limits, find partner offers, and propose a contribution or a purchase. I can't approve anything or move money myself — that's the point.</p>
+          <p>Hi — I'm your CampusHood agent. I can check balances, explain your spending limits, find partner offers, and propose a contribution or a purchase. I can't approve anything or move money myself — that's the point.</p>
         </div>
       </div>
       <form class="chat-form" id="chatForm" autocomplete="off">
@@ -212,7 +209,7 @@
 <footer class="footer">
   <div class="footer-grid">
     <div>
-      <p class="brand-name">CampusPool</p>
+      <p class="brand-name">CampusHood</p>
       <p class="muted">A hackathon prototype exploring how an AI agent can be genuinely useful with money without ever being trusted with it.</p>
     </div>
     <div>
@@ -228,11 +225,13 @@
   <div class="legal">
     <p><strong>Synthetic data notice.</strong> All users, balances, transactions, offers, rewards and pool members shown in this application are synthetic demo content created for evaluation purposes. No real student, merchant or financial account is represented.</p>
     <p><strong>Test mode notice.</strong> Payments are processed exclusively through Razorpay Test Mode. No real funds are transferred, held or at risk. Partner offers are promotions, not financial advice.</p>
-    <p class="muted">© <span id="year"></span> CampusPool demo. Built with a local open-weights model, FastAPI and Razorpay Test Mode.</p>
+    <p class="muted">© <span id="year"></span> CampusHood demo. Built with a local open-weights model, FastAPI and Razorpay Test Mode.</p>
   </div>
 </footer>
 
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="/app/three.min.js"></script>
+<script src="/app/hero3d.js"></script>
 <script src="/app/app.js"></script>
 </body>
 </html>

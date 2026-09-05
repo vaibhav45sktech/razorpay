@@ -118,7 +118,7 @@
     await new Promise((resolve) => {
       const rzp = new Razorpay({
         key: ex.key_id, order_id: ex.order_id, amount: ex.amount_paise, currency: ex.currency,
-        name: "CampusPool (DEMO — Test Mode)", description: "Synthetic demo · no real money",
+        name: "CampusHood (DEMO — Test Mode)", description: "Synthetic demo · no real money",
         theme: { color: "#17b26a" },
         handler: async (resp) => {
           try {
