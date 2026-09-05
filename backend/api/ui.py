@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 
@@ -38,6 +38,13 @@ _TYPES = {".css": "text/css", ".js": "application/javascript", ".svg": "image/sv
 @router.get("/", include_in_schema=False)
 def index() -> Response:
     return FileResponse(FRONTEND_DIR / "index.html", media_type="text/html", headers=_HEADERS)
+
+
+@router.get("/app", include_in_schema=False)
+def app_alias() -> Response:
+    """The README and demo script say /app; the page itself is served at /.
+    Both must work, because a 404 in front of a judge is unrecoverable."""
+    return RedirectResponse("/", status_code=307)
 
 
 @router.get("/app/{asset}", include_in_schema=False)

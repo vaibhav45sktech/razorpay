@@ -133,124 +133,130 @@
 <!-- ============================== APP (AUTOPILOT) ============================== -->
 <section class="section app" id="app">
   <div class="app-head reveal">
-    <div>
-      <p class="eyebrow">Autopilot</p>
-      <h2>Agree once a month. The agent handles the rest.</h2>
-      <p class="sub">It proposes this month's contribution, works out which pool round you should draw from your stated needs, and lines up offers against your spending rule. Every number here is read from the ledger; your tap is the only thing that moves money.</p>
-    </div>
-    <div class="tabs" role="tablist" aria-label="Autopilot">
-      <button class="tab active" role="tab" data-tab="plan" aria-selected="true"><span class="tab-n">1</span>Plan</button>
-      <button class="tab" role="tab" data-tab="pool" aria-selected="false"><span class="tab-n">2</span>Pool</button>
-      <button class="tab" role="tab" data-tab="spend" aria-selected="false"><span class="tab-n">3</span>Spend</button>
-    </div>
+    <p class="eyebrow">Autopilot</p>
+    <h2>Your month, told in four steps.</h2>
+    <p class="sub">The agent reads your ledger, proposes, gets checked by the policy engine, and then waits for your tap. Nothing moves before step four.</p>
   </div>
 
   <div class="app-grid">
-    <div class="panels">
+    <!-- ---------- STORY (left) ---------- -->
+    <div class="story">
+      <div class="seg" role="tablist" aria-label="Autopilot">
+        <button class="seg-btn active" role="tab" data-tab="plan" aria-selected="true"><span class="seg-n">1</span><span class="seg-t"><b>Plan</b><small>this month's saving</small></span></button>
+        <button class="seg-btn" role="tab" data-tab="pool" aria-selected="false"><span class="seg-n">2</span><span class="seg-t"><b>Pool</b><small>when you draw</small></span></button>
+        <button class="seg-btn" role="tab" data-tab="spend" aria-selected="false"><span class="seg-n">3</span><span class="seg-t"><b>Spend</b><small>offers inside your rule</small></span></button>
+      </div>
 
-      <!-- ---------- PLAN ---------- -->
+      <!-- PLAN -->
       <div class="panel active" data-panel="plan" role="tabpanel">
-        <div class="card plan-card reveal">
-          <div class="card-head">
-            <h3>This month <span class="pill pill-muted" id="planMonth">—</span></h3>
+        <article class="story-card reveal">
+          <header class="sc-top">
+            <span class="sc-kicker" id="planMonth">—</span>
             <span class="pill" id="planStatus">loading</span>
+          </header>
+          <div class="sc-hero">
+            <span class="sc-label" id="planLabel">Agent proposes</span>
+            <strong class="sc-big" id="planAmount">—</strong>
+            <span class="sc-note" id="planBand"></span>
           </div>
-          <p class="plan-headline" id="planHeadline">Reading your ledger…</p>
-          <div class="plan-amount-row">
-            <div class="plan-amount"><span class="lbl">Agent proposes</span><strong id="planAmount">—</strong><span class="band" id="planBand"></span></div>
-            <div class="plan-cta" id="planCta"></div>
-          </div>
-          <div class="plan-policy" id="planPolicy"></div>
-          <div class="why">
-            <p class="why-h">Why this amount</p>
+          <ol class="steps" id="planSteps" aria-label="How this month's plan was made"></ol>
+          <details class="more">
+            <summary>Every reason, in the engine's own words</summary>
             <ul id="planReasons"></ul>
-          </div>
-        </div>
+          </details>
+        </article>
 
-        <div class="card reveal d1" id="goalCard">
-          <div class="card-head"><h3>Goal</h3><span class="pill pill-muted" id="goalEta">—</span></div>
+        <article class="tile-card reveal d1" id="goalCard">
+          <div class="tile-head"><span class="ico orange" aria-hidden="true">◎</span><div><b>Your goal</b><small id="goalEta">—</small></div></div>
           <div id="goalBody"><p class="empty">No active goal.</p></div>
-        </div>
+        </article>
       </div>
 
-      <!-- ---------- POOL ---------- -->
+      <!-- POOL -->
       <div class="panel" data-panel="pool" role="tabpanel" hidden>
-        <div class="card reveal" id="poolCard">
-          <div class="card-head">
-            <h3 id="poolTitle">Savings cycle <span class="demo-tag">simulated</span></h3>
+        <article class="story-card reveal" id="poolCard">
+          <header class="sc-top">
+            <span class="sc-kicker" id="poolTitle">Savings cycle</span>
             <span class="pill pill-muted" id="poolMeta">—</span>
+          </header>
+          <div class="sc-hero">
+            <span class="sc-label" id="recLabel">Agent's pick</span>
+            <strong class="sc-big sc-serif" id="recMonth">—</strong>
+            <span class="sc-note" id="recNote"></span>
           </div>
-          <p class="sub-sm" id="poolNote">Ten members put in ₹500 a round; one member draws the ₹5,000 round each month. No money is pooled — every member keeps an individual ledger and each draw is authorised by a written allocation.</p>
-          <div class="timeline" id="timeline" aria-label="Rounds"></div>
-        </div>
+          <ol class="steps" id="poolSteps" aria-label="How the draw was chosen"></ol>
+          <div class="strip-wrap">
+            <p class="strip-h">The ten rounds <span class="demo-tag">simulated</span></p>
+            <div class="strip" id="timeline" aria-label="Rounds"></div>
+          </div>
+          <div id="recExtra"></div>
+        </article>
 
-        <div class="pool-grid">
-          <div class="card rec-card reveal d1" id="recCard">
-            <div class="card-head"><h3>Agent's recommendation</h3><span class="pill" id="recPill">—</span></div>
-            <div id="recBody"></div>
-          </div>
-
-          <div class="card reveal d2" id="needsCard">
-            <div class="card-head"><h3>What's coming up</h3><span class="pill pill-muted" id="needsCount">0</span></div>
-            <p class="sub-sm">Tell the agent about upcoming expenses. The recommendation and the offers update the moment you add one.</p>
-            <form id="needForm" class="need-form" autocomplete="off">
-              <input name="label" placeholder="What (e.g. exam fees)" required minlength="2" maxlength="120" aria-label="What">
-              <input name="month" type="month" required aria-label="Month">
-              <input name="amount" type="number" min="1" step="1" placeholder="₹ amount" required aria-label="Amount in rupees">
-              <select name="category" aria-label="Category"><option value="">Category</option></select>
-              <button class="btn btn-primary btn-sm" type="submit">Add</button>
-            </form>
-            <ul class="needs" id="needsList"></ul>
-          </div>
-        </div>
+        <article class="tile-card reveal d1" id="needsCard">
+          <div class="tile-head"><span class="ico blue" aria-hidden="true">＋</span><div><b>What's coming up</b><small>Add an expense and the pick updates instantly</small></div><span class="pill pill-muted" id="needsCount">0</span></div>
+          <form id="needForm" class="need-form" autocomplete="off">
+            <input name="label" placeholder="What (e.g. exam fees)" required minlength="2" maxlength="120" aria-label="What">
+            <input name="month" type="month" required aria-label="Month">
+            <input name="amount" type="number" min="1" step="1" placeholder="₹ amount" required aria-label="Amount in rupees">
+            <select name="category" aria-label="Category"><option value="">Category</option></select>
+            <button class="btn btn-primary btn-sm" type="submit">Add</button>
+          </form>
+          <ul class="needs" id="needsList"></ul>
+        </article>
       </div>
 
-      <!-- ---------- SPEND ---------- -->
+      <!-- SPEND -->
       <div class="panel" data-panel="spend" role="tabpanel" hidden>
-        <div class="card reveal">
-          <div class="card-head"><h3>Spending rule</h3><span class="pill pill-muted" id="spendRule">—</span></div>
-          <div class="meter-block">
-            <div class="meter-label"><span>Discretionary this month</span><span id="spendText2">—</span></div>
-            <div class="meter"><span class="meter-fill" id="spendFill2"></span></div>
-            <div class="meter-foot"><span id="spendHeadroom">—</span><span id="spendThreshold">—</span></div>
+        <article class="story-card reveal">
+          <header class="sc-top">
+            <span class="sc-kicker">Spending rule</span>
+            <span class="pill pill-muted" id="spendRule">—</span>
+          </header>
+          <div class="sc-hero ring-hero">
+            <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+              <circle class="ring-track" cx="60" cy="60" r="50"/>
+              <circle class="ring-fill" id="ringFill" cx="60" cy="60" r="50"/>
+            </svg>
+            <div>
+              <span class="sc-label">Left to spend this month</span>
+              <strong class="sc-big" id="spendHeadroom">—</strong>
+              <span class="sc-note" id="spendText2">—</span>
+            </div>
           </div>
-          <p class="sub-sm">Tap an offer and the agent proposes the purchase. The policy engine decides: within your rule it becomes payable, above your approval threshold it waits for your tap, over your limit it is refused and recorded.</p>
-        </div>
+          <ol class="steps steps-row" id="spendSteps" aria-label="How offers are handled"></ol>
+        </article>
         <div class="offers" id="offers"></div>
       </div>
     </div>
 
-    <!-- ---------- SIDEBAR ---------- -->
-    <aside class="state-col">
-      <div class="card reveal">
-        <div class="card-head"><h3>Your money <span class="demo-tag">demo</span></h3><span class="pill pill-muted" id="stateStamp">—</span></div>
-        <div class="balances">
-          <div class="bal">
-            <span class="bal-label">Emergency savings <span class="lock" title="Protected: the agent can never spend this">🔒</span></span>
-            <span class="bal-value" id="balEmergency">—</span>
-          </div>
-          <div class="bal">
-            <span class="bal-label">Rewards &amp; payouts</span>
-            <span class="bal-value" id="balRewards">—</span>
-          </div>
+    <!-- ---------- WALLET (right) ---------- -->
+    <aside class="wallet">
+      <article class="wallet-card reveal">
+        <div class="w-top"><span class="w-title">Your money <span class="demo-tag">demo</span></span><span class="w-stamp" id="stateStamp">—</span></div>
+        <span class="w-label">Emergency savings <span class="lock" title="Protected: the agent can never spend this">🔒 protected</span></span>
+        <strong class="w-big" id="balEmergency">—</strong>
+        <div class="tiles">
+          <div class="tile purple"><span class="t-ico" aria-hidden="true">🔒</span><span class="t-label">Saved</span><b id="tileSaved">—</b></div>
+          <div class="tile blue"><span class="t-ico" aria-hidden="true">↗</span><span class="t-label" id="tileSpentLabel">Spent this month</span><b id="tileSpent">—</b></div>
+          <div class="tile green"><span class="t-ico" aria-hidden="true">★</span><span class="t-label">Rewards &amp; payouts</span><b id="balRewards">—</b></div>
+          <div class="tile orange"><span class="t-ico" aria-hidden="true">◎</span><span class="t-label" id="tileGoalLabel">Goal</span><b id="tileGoal">—</b></div>
         </div>
         <div class="meter-block">
-          <div class="meter-label"><span>Discretionary spending this month</span><span id="spendText">—</span></div>
+          <div class="meter-label"><span>Spending room</span><span id="spendText">—</span></div>
           <div class="meter"><span class="meter-fill" id="spendFill"></span></div>
           <div class="meter-foot"><span id="spendRemaining">—</span><span id="spendPct">—</span></div>
         </div>
-        <div class="goals" id="goals"></div>
-      </div>
+      </article>
 
-      <div class="card reveal" id="pendingCard">
-        <div class="card-head"><h3>Needs your decision</h3><span class="pill pill-warn" id="pendingCount">0</span></div>
-        <div id="pendingList" class="pending-list"><p class="empty">Nothing waiting. When the agent proposes something above your approval threshold, it appears here — and only your tap can approve it.</p></div>
-      </div>
+      <article class="wallet-card reveal" id="pendingCard">
+        <div class="w-top"><span class="w-title">Needs your decision</span><span class="pill pill-warn" id="pendingCount">0</span></div>
+        <div id="pendingList" class="pending-list"><p class="empty">Nothing waiting. Anything above your approval line lands here — and only your tap can approve it.</p></div>
+      </article>
 
-      <div class="card recent reveal">
-        <div class="card-head"><h3>Recent activity</h3></div>
+      <article class="wallet-card reveal">
+        <div class="w-top"><span class="w-title">Latest activity</span></div>
         <ul id="recent" class="recent-list"></ul>
-      </div>
+      </article>
     </aside>
   </div>
 </section>

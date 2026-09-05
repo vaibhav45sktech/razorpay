@@ -41,13 +41,19 @@
 
   // ---- tabs
   function showTab(name) {
-    $$(".tab").forEach((t) => { const on = t.dataset.tab === name; t.classList.toggle("active", on); t.setAttribute("aria-selected", String(on)); });
+    $$(".seg-btn").forEach((t) => { const on = t.dataset.tab === name; t.classList.toggle("active", on); t.setAttribute("aria-selected", String(on)); });
     $$(".panel").forEach((p) => { p.hidden = p.dataset.panel !== name; });
     $$(".panel:not([hidden]) .reveal").forEach((el) => el.classList.add("in"));
     try { localStorage.setItem("cp.tab", name); } catch {}
   }
-  $$(".tab").forEach((t) => t.addEventListener("click", () => showTab(t.dataset.tab)));
-  try { const saved = localStorage.getItem("cp.tab"); if (saved && $(`.tab[data-tab="${saved}"]`)) showTab(saved); } catch {}
+  $$(".seg-btn").forEach((t) => t.addEventListener("click", () => showTab(t.dataset.tab)));
+  try { const saved = localStorage.getItem("cp.tab"); if (saved && $(`.seg-btn[data-tab="${saved}"]`)) showTab(saved); } catch {}
+
+  // ---- the story thread: one <li> per step. `color` is presentation; every
+  // word inside comes from an API field or is a fixed label.
+  function step({ n, color = "", title, text = "", act = "", tag = "" }) {
+    return `<li class="step ${color}"><span class="dot">${n}</span><div class="s-body"><div class="s-title">${title}${tag ? `<span class="status ${esc(tag)}">${esc(tag.replace(/_/g, " "))}</span>` : ""}</div>${text ? `<div class="s-text">${text}</div>` : ""}${act ? `<div class="s-act">${act}</div>` : ""}</div></li>`;
+  }
 
   // ---- drawer: Ask the agent
   const drawer = $("#drawer"), backdrop = $("#drawerBackdrop");
@@ -79,34 +85,44 @@
     const st = $("#planStatus");
     st.textContent = { due: "action needed", pending: "waiting for payment", done: "done for the month" }[p.status] || p.status;
     st.className = "pill " + ({ due: "pill-warn", pending: "pill-warn", done: "" }[p.status] || "pill-muted");
-    $("#planHeadline").textContent = p.headline;
-    $("#planAmount").textContent = rupees0(p.status === "pending" && p.pending_intent ? p.pending_intent.amount_paise : p.recommended_paise);
-    $("#planBand").textContent = `allowed band ${rupees0(p.band.min_paise)}–${rupees0(p.band.max_paise)}`;
+    const amount = p.status === "pending" && p.pending_intent ? p.pending_intent.amount_paise : p.recommended_paise;
+    $("#planAmount").textContent = rupees0(amount);
+    $("#planLabel").textContent = { done: "Put in this month", pending: "Waiting for your payment" }[p.status] || "Agent proposes";
+    $("#planBand").textContent = `${p.headline} · allowed band ${rupees0(p.band.min_paise)}–${rupees0(p.band.max_paise)}`;
 
-    const cta = $("#planCta"); cta.innerHTML = "";
+    // The story: saw → proposed → checked → your tap.
+    const g = p.goal, pol = p.policy_preview || {}, reasons = p.reasons || [];
+    const saw = g
+      ? `<b>${rupees0(g.saved_paise)}</b> saved of <b>${rupees0(g.target_paise)}</b> for “${esc(g.label)}” — ${rupees0(g.remaining_paise)} to go.`
+      : `No active savings goal on the ledger.`;
+    let tap;
     if (p.status === "done") {
-      cta.innerHTML = `<span class="done">Contribution in the ledger</span>`;
+      tap = { color: "green", title: "Done for the month", text: "The contribution is in the ledger. Nothing to do until next month.", act: `<span class="done-chip">Contribution recorded</span>` };
     } else if (p.status === "pending" && p.pending_intent) {
       const i = p.pending_intent;
-      cta.innerHTML = i.status === "AWAITING_APPROVAL"
-        ? `<span class="pill pill-warn">approve it in “Needs your decision”</span>`
-        : `<button class="btn btn-neon" id="planPay">${i.status === "EXECUTING" ? "Resume payment" : `Pay ${rupees0(i.amount_paise)} with Razorpay (test)`}</button>`;
-      const b = $("#planPay"); if (b) b.onclick = () => guard(b, () => payIntent(i.intent_id));
+      tap = i.status === "AWAITING_APPROVAL"
+        ? { color: "amber", title: "Waiting for your approval", text: "It is above your approval line, so it sits under “Needs your decision” until you tap.", tag: i.status }
+        : { color: "", title: "Your tap", text: "A contribution is waiting for its payment. Razorpay test checkout — no real money.", act: `<button class="btn btn-neon" id="planPay">${i.status === "EXECUTING" ? "Resume payment" : `Pay ${rupees0(i.amount_paise)} (test)`}</button>`, tag: i.status };
     } else {
-      cta.innerHTML = `<button class="btn btn-neon" id="planAgree">Agree &amp; pay ${rupees0(p.recommended_paise)}</button>`;
-      $("#planAgree").onclick = () => guard($("#planAgree"), agreeAndPay);
+      tap = { color: "todo", title: "Your tap", text: "The only step that moves money — and the only one the agent cannot take.", act: `<button class="btn btn-neon" id="planAgree">Agree &amp; pay ${rupees0(p.recommended_paise)}</button>` };
     }
+    $("#planSteps").innerHTML = [
+      step({ n: 1, color: "purple", title: "It read your ledger", text: saw }),
+      step({ n: 2, color: "blue", title: `It proposed ${rupees0(p.recommended_paise)}`, text: esc(reasons.length > 1 ? reasons.slice(1).join(" ") : (reasons[0] || "")) }),
+      step({ n: 3, color: pol.decision === "ALLOW" ? "green" : pol.decision === "DENY" ? "red" : "amber", title: "Policy checked it", text: esc(pol.reason || ""), tag: pol.decision || "" }),
+      step({ n: 4, ...tap }),
+    ].join("");
+    const pay = $("#planPay"); if (pay && p.pending_intent) pay.onclick = () => guard(pay, () => payIntent(p.pending_intent.intent_id));
+    const agree = $("#planAgree"); if (agree) agree.onclick = () => guard(agree, agreeAndPay);
 
-    const pol = p.policy_preview || {};
-    $("#planPolicy").innerHTML = `<span class="status ${esc(pol.decision === "ALLOW" ? "ALLOWED" : pol.decision || "")}">policy · ${esc(pol.decision || "—")}</span><span>${esc(pol.reason || "")}</span>`;
     const ul = $("#planReasons"); ul.innerHTML = "";
-    (p.reasons || []).forEach((r) => { const li = document.createElement("li"); li.textContent = r; ul.appendChild(li); });
+    reasons.forEach((r) => { const li = document.createElement("li"); li.textContent = r; ul.appendChild(li); });
 
-    const g = p.goal, body = $("#goalBody"), eta = $("#goalEta");
+    const body = $("#goalBody"), eta = $("#goalEta");
     if (!g) { body.innerHTML = `<p class="empty">No active goal — the plan keeps the habit at the minimum contribution.</p>`; eta.textContent = "—"; return; }
-    eta.textContent = g.months_to_goal == null ? "reached" : `${g.months_to_goal} month${g.months_to_goal === 1 ? "" : "s"} to go · ${g.goal_month_label}`;
+    eta.textContent = g.months_to_goal == null ? "reached" : `${g.months_to_goal} month${g.months_to_goal === 1 ? "" : "s"} to go · lands around ${g.goal_month_label}`;
     body.innerHTML = `<div class="goal-big">
-        <div class="nums"><span><strong>${rupees0(g.saved_paise)}</strong> <span class="muted">saved of ${rupees0(g.target_paise)}</span></span><span class="muted">${g.pct_complete}%</span></div>
+        <div class="nums"><span><strong>${rupees0(g.saved_paise)}</strong> <span class="muted">of ${rupees0(g.target_paise)}</span></span><span class="muted">${g.pct_complete}%</span></div>
         <div class="meter"><span class="meter-fill" style="width:${Math.min(100, g.pct_complete)}%"></span></div>
         <div class="goal-foot"><span>${esc(g.label)}</span><span>${rupees0(g.remaining_paise)} remaining</span></div>
       </div>`;
@@ -125,13 +141,14 @@
   // =====================================================================
   function renderPool(v) {
     state.pool = v;
-    const tl = $("#timeline"), rec = $("#recBody"), pill = $("#recPill");
+    const tl = $("#timeline"), stepsEl = $("#poolSteps"), extra = $("#recExtra");
     if (!v.in_pool) {
-      $("#poolMeta").textContent = "not in a cycle"; tl.innerHTML = `<p class="empty">${esc(v.message)}</p>`; rec.innerHTML = `<p class="empty">Join a cycle to get a draw recommendation.</p>`; pill.textContent = "—"; renderNeeds(v.needs || []); return;
+      $("#poolMeta").textContent = "not in a cycle"; $("#recMonth").textContent = "—"; $("#recNote").textContent = "";
+      tl.innerHTML = `<p class="empty">${esc(v.message)}</p>`; stepsEl.innerHTML = ""; extra.innerHTML = `<p class="empty">Join a cycle to get a draw recommendation.</p>`; renderNeeds(v.needs || []); return;
     }
     const c = v.cycle;
-    $("#poolMeta").textContent = `${c.member_count} members · ${rupees0(c.contribution_amount_paise)} a round · ${rupees0(v.round_amount_paise)} per draw`;
-    $("#poolTitle").firstChild.textContent = c.label + " ";
+    $("#poolMeta").textContent = `${c.member_count} members · ${rupees0(c.contribution_amount_paise)} a round`;
+    $("#poolTitle").textContent = c.label;
 
     tl.innerHTML = "";
     v.rounds.forEach((r) => {
@@ -139,44 +156,55 @@
       if (el.tagName === "BUTTON") { el.type = "button"; el.dataset.month = r.month; el.title = "Request this round"; }
       const mine = r.requested_by_you;
       el.className = "round " + (r.past ? "past" : "open") + (r.current ? " current" : "") + (r.recommended && !mine ? " rec" : "") + (mine ? " mine" : "") + (mine && v.my_draw && v.my_draw.status === "paid" ? " paid" : "");
-      const status = r.past ? `drawn · ${r.drawer}` : mine ? (v.my_draw && v.my_draw.status === "paid" ? "paid out to you (simulated)" : "your requested round") : r.recommended ? "recommended for you" : "open";
+      const status = r.past ? `drawn · ${r.drawer}` : mine ? (v.my_draw && v.my_draw.status === "paid" ? "paid out to you (simulated)" : "your requested round") : r.recommended ? "for you" : "open";
       el.innerHTML = `<span class="r-i">Round ${r.index}</span><span class="r-m">${esc(r.label)}</span><span class="r-s">${esc(status)}</span>`;
       tl.appendChild(el);
     });
 
-    const R = v.recommendation, mine = v.my_draw;
-    if (!R) { pill.textContent = "—"; rec.innerHTML = `<p class="empty">Every round of this cycle has been drawn.</p>`; }
-    else {
+    const R = v.recommendation, mine = v.my_draw, needs = v.needs || [];
+    extra.innerHTML = "";
+    if (!R) {
+      $("#recLabel").textContent = "Agent's pick"; $("#recMonth").textContent = "—"; $("#recNote").textContent = "Every round of this cycle has been drawn.";
+      stepsEl.innerHTML = "";
+    } else {
       const following = mine && mine.round_month === R.month;
-      pill.textContent = mine ? (following ? "you're on it" : "you chose differently") : "not requested yet";
-      pill.className = "pill " + (mine ? (following ? "" : "pill-warn") : "pill-muted");
       const openRounds = v.rounds.filter((r) => !r.past && r.month !== R.month);
-      rec.innerHTML = `
-        <div class="rec-month">${esc(R.label)}</div>
-        <p class="rec-sub">Draw the ${rupees0(R.amount_paise)} round then. Based on ${rupees0(v.saved_now_paise)} saved now and ${rupees0(v.assumed_monthly_contribution_paise)} a month going forward.</p>
-        <div class="why"><p class="why-h">Why</p><ul>${R.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul></div>
-        <div class="rec-actions">
-          ${mine && mine.status === "paid" ? "" : `<button class="btn btn-neon btn-sm" id="reqRec" ${following ? "disabled" : ""}>${following ? "Requested ✓" : "Request this round"}</button>`}
-          ${mine && mine.status === "paid" ? "" : `<select id="otherRound" aria-label="Or pick another open round"><option value="">Or pick another round…</option>${openRounds.map((r) => `<option value="${esc(r.month)}">${esc(r.label)}</option>`).join("")}</select>`}
-        </div>
-        ${mine ? `<div class="mine-box">
-            <div class="intent-top"><strong>Your draw · ${esc(mine.round_month ? (v.rounds.find((r) => r.month === mine.round_month) || {}).label || mine.round_month : "—")}</strong><span class="status ${mine.status === "paid" ? "LEDGER_UPDATED" : "ALLOWED"}">${esc(mine.status)}</span></div>
-            <div class="reason">${esc(mine.reason)}</div>
-            ${mine.status !== "paid" && v.can_simulate_draw ? `<div><button class="btn btn-ghost btn-sm" id="simDraw">Simulate the payout (demo)</button></div>` : ""}
-            ${mine.status === "paid" ? `<div class="muted" style="font-size:.82rem">Settled through the same policy gate a real payout would use. It shows under “Rewards &amp; payouts”.</div>` : ""}
-          </div>` : ""}`;
+      $("#recLabel").textContent = `Agent's pick · draw the ${rupees0(R.amount_paise)} round in`;
+      $("#recMonth").textContent = R.label;
+      $("#recNote").textContent = mine ? (following ? "You've requested it." : "You chose a different round — recorded with the agent's assessment.") : "Not requested yet — step four is yours.";
+
+      const told = needs.length
+        ? `<b>${needs.length}</b> upcoming expense${needs.length === 1 ? "" : "s"} listed, ${rupees0(needs.reduce((a, n) => a + n.amount_paise, 0))} in total.`
+        : `Nothing listed yet — so it assumes you don't need early access.`;
+      let call;
+      if (mine && mine.status === "paid") {
+        call = { color: "green", title: "Paid out to you (simulated)", text: `${esc(mine.reason)} It shows under “Rewards & payouts”.`, tag: "LEDGER_UPDATED" };
+      } else if (mine) {
+        call = { color: following ? "green" : "amber", title: following ? "You requested the agent's pick" : "You chose differently", text: esc(mine.reason),
+          act: v.can_simulate_draw ? `<button class="btn btn-ghost btn-sm" id="simDraw">Simulate the payout (demo)</button>` : "", tag: mine.status };
+      } else {
+        call = { color: "todo", title: "Your call", text: "Request the pick, or any other open round — the agent only recommends.",
+          act: `<button class="btn btn-neon btn-sm" id="reqRec">Request ${esc(R.label)}</button><select id="otherRound" aria-label="Or pick another open round"><option value="">Or another round…</option>${openRounds.map((r) => `<option value="${esc(r.month)}">${esc(r.label)}</option>`).join("")}</select>` };
+      }
+      stepsEl.innerHTML = [
+        step({ n: 1, color: "purple", title: "You told it what's coming", text: told }),
+        step({ n: 2, color: "blue", title: "It projected your savings", text: `<b>${rupees0(v.saved_now_paise)}</b> saved now, plus <b>${rupees0(v.assumed_monthly_contribution_paise)}</b> a month going forward.${needs.length && R.reasons.length > 1 ? " " + esc(R.reasons[0]) : ""}` }),
+        step({ n: 3, color: "green", title: `It picked ${esc(R.label)}`, text: esc(R.reasons[R.reasons.length - 1] || "") }),
+        step({ n: 4, ...call }),
+      ].join("");
       const rb = $("#reqRec"); if (rb) rb.onclick = () => guard(rb, () => requestRound(R.month));
       const sel = $("#otherRound"); if (sel) sel.onchange = () => { if (sel.value) requestRound(sel.value).catch((e) => toast(e.message, "bad")); };
       const sd = $("#simDraw"); if (sd) sd.onclick = () => guard(sd, simulateDraw);
+      if (R.reasons.length > 1) extra.innerHTML = `<details class="more"><summary>Every reason, in the engine's own words</summary><ul>${R.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul></details>`;
     }
 
     const ben = (v.benefits || []);
     if (ben.length) {
       const box = document.createElement("div"); box.className = "benefits";
-      box.innerHTML = `<p class="why-h">Your benefits this cycle</p>` + ben.map((b) => `<div class="benefit"><strong>${rupees0(b.amount_paise)}</strong> · ${esc(b.status)}<span class="reason">${esc(b.reason)}</span></div>`).join("");
-      rec.appendChild(box);
+      box.innerHTML = `<p class="strip-h">Your benefits this cycle</p>` + ben.map((b) => `<div class="benefit"><strong>${rupees0(b.amount_paise)}</strong> · ${esc(b.status)}<span class="reason">${esc(b.reason)}</span></div>`).join("");
+      extra.appendChild(box);
     }
-    renderNeeds(v.needs || []);
+    renderNeeds(needs);
   }
 
   $("#timeline").addEventListener("click", (e) => {
@@ -233,17 +261,25 @@
   // SPEND
   // =====================================================================
   function renderSpend(v) {
-    $("#spendRule").textContent = `limit ${rupees0(v.monthly_limit_paise)} · approval above ${rupees0(v.approval_threshold_paise)}` + (v.paused ? " · PAUSED" : "");
-    $("#spendText2").textContent = `${rupees0(v.spent_this_month_paise)} of ${rupees0(v.monthly_limit_paise)}`;
-    $("#spendHeadroom").textContent = `${rupees0(v.headroom_paise)} headroom`;
-    $("#spendThreshold").textContent = state.spending ? `${state.spending.pct_used}% used` : "";
-    const fill = $("#spendFill2"); if (state.spending) { fill.style.width = `${Math.min(100, state.spending.pct_used)}%`; fill.classList.toggle("hot", state.spending.pct_used >= 80); }
+    $("#spendRule").textContent = `limit ${rupees0(v.monthly_limit_paise)} · ask me above ${rupees0(v.approval_threshold_paise)}` + (v.paused ? " · PAUSED" : "");
+    $("#spendText2").textContent = `${rupees0(v.spent_this_month_paise)} of ${rupees0(v.monthly_limit_paise)} used this month`;
+    $("#spendHeadroom").textContent = rupees0(v.headroom_paise);
+    const ring = $("#ringFill"), C = 2 * Math.PI * 50;                      // geometry only; pct_used is the API's
+    if (state.spending) { ring.style.strokeDashoffset = String(C * Math.min(100, state.spending.pct_used) / 100); ring.classList.toggle("hot", state.spending.pct_used >= 80); }
     fillCategories(v.categories || []);
+
+    const matched = v.offers.filter((o) => o.matched_needs.length).length;
+    $("#spendSteps").innerHTML = [
+      step({ n: 1, color: "purple", title: "Your rule", text: `Up to <b>${rupees0(v.monthly_limit_paise)}</b> a month; anything over <b>${rupees0(v.approval_threshold_paise)}</b> needs your tap.` }),
+      step({ n: 2, color: "blue", title: "Matched to your needs", text: matched ? `<b>${matched}</b> of ${v.offers.length} offers line up with something you listed.` : `No offer matches a listed need yet — add one under Pool.` }),
+      step({ n: 3, color: "green", title: "Tap one, policy decides", text: "Green goes to checkout, amber waits for you, red is refused and recorded." }),
+    ].join("");
 
     const box = $("#offers"); box.innerHTML = "";
     if (!v.offers.length) { box.innerHTML = `<p class="empty">No eligible offers right now.</p>`; return; }
     v.offers.forEach((o) => {
       const el = document.createElement("article"); el.className = "offer" + (o.matched_needs.length ? " matched" : "");
+      const [c, cs] = catColor(o.category); el.style.setProperty("--c", c); el.style.setProperty("--cs", cs);
       const pv = o.policy_preview;
       const verdict = !pv ? `<span class="status">no fixed price</span><span>ask the agent about it</span>`
         : pv.decision === "ALLOW" ? `<span class="status ALLOWED">within your rule</span><span>${esc(pv.reason)}</span>`
@@ -251,13 +287,16 @@
         : `<span class="status DENIED">over your limit</span><span>${esc(pv.reason)}</span>`;
       el.innerHTML = `
         <div class="offer-top"><div><div class="merchant">${esc(o.merchant)}</div><div class="title">${esc(o.title)}</div></div><span class="cat">${esc(o.category || "")}</span></div>
-        <div class="price">${o.effective_price_paise != null ? `<strong>${rupees0(o.effective_price_paise)}</strong>` : `<strong>—</strong>`}${o.list_price_paise != null && o.effective_price_paise != null && o.list_price_paise !== o.effective_price_paise ? `<s>${rupees0(o.list_price_paise)}</s>` : ""}${o.effective_discount_paise ? `<span class="save">save ${rupees0(o.effective_discount_paise)}</span>` : ""}</div>
+        <div class="price">${o.effective_price_paise != null ? `<strong>${rupees0(o.effective_price_paise)}</strong>` : `<strong class="varies">Price varies</strong>`}${o.list_price_paise != null && o.effective_price_paise != null && o.list_price_paise !== o.effective_price_paise ? `<s>${rupees0(o.list_price_paise)}</s>` : ""}${o.effective_discount_paise ? `<span class="save">save ${rupees0(o.effective_discount_paise)}</span>` : ""}</div>
         ${o.match_note ? `<div class="match">◆ ${esc(o.match_note)}</div>` : ""}
         <div class="verdict">${verdict}</div>
         <div class="offer-actions">${o.effective_price_paise != null && pv && pv.decision !== "DENY" ? `<button class="btn btn-primary btn-sm" data-offer="${esc(o.offer_id)}">${pv.decision === "ALLOW" ? "Propose & pay" : "Propose for approval"}</button>` : `<span class="muted" style="font-size:.8rem">${o.effective_price_paise == null ? "" : "The agent won't propose this — it would break your rule."}</span>`}</div>`;
       box.appendChild(el);
     });
   }
+  // Category → tile colour. Presentation only; unknown categories fall back to ink.
+  const CAT_COLORS = [["var(--purple)", "var(--purple-soft)"], ["var(--blue)", "var(--blue-soft)"], ["var(--green)", "var(--green-soft)"], ["var(--orange)", "var(--orange-soft)"]];
+  const catColor = (cat) => { if (!cat) return ["var(--ink)", "var(--bg-2)"]; let h = 0; for (const ch of String(cat)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return CAT_COLORS[h % CAT_COLORS.length]; };
   $("#offers").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-offer]"); if (!b) return;
     guard(b, async () => {
@@ -277,26 +316,24 @@
     $("#stateStamp").textContent = "verified " + new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
     const b = s.balances_paise || {};
     $("#balEmergency").textContent = rupees(b.emergency_savings);
-    $("#balRewards").textContent = rupees(b.rewards);
+    $("#tileSaved").textContent = rupees0(b.emergency_savings);
+    $("#balRewards").textContent = rupees0(b.rewards);
     $("[data-stat=emergency]").textContent = rupees0(b.emergency_savings);
 
     const sp = s.spending_this_month; state.spending = sp;
     if (sp) {
+      $("#tileSpent").textContent = rupees0(sp.used_paise); $("#tileSpentLabel").textContent = `Spent · of ${rupees0(sp.limit_paise)}`;
       $("#spendText").textContent = `${rupees0(sp.used_paise)} of ${rupees0(sp.limit_paise)}`;
-      $("#spendRemaining").textContent = `${rupees0(sp.remaining_paise)} remaining`;
+      $("#spendRemaining").textContent = `${rupees0(sp.remaining_paise)} left`;
       $("#spendPct").textContent = `${sp.pct_used}% used`;               // pct comes from the API
       const fill = $("#spendFill"); fill.style.width = `${Math.min(100, sp.pct_used)}%`; fill.classList.toggle("hot", sp.pct_used >= 80);
       $("[data-stat=spent]").textContent = `${rupees0(sp.used_paise)} / ${rupees0(sp.limit_paise)}`;
     }
 
-    const goals = $("#goals"); goals.innerHTML = "";
-    (s.goals || []).forEach((g) => {
-      const el = document.createElement("div"); el.className = "goal" + (g.status === "paused" ? " paused" : "");
-      el.innerHTML = `<div class="goal-top"><strong>${esc(g.label)}</strong><span class="status ${g.status === "paused" ? "EXCEPTION" : "ALLOWED"}">${esc(g.status)}</span></div>
-        <div class="meter"><span class="meter-fill" style="width:${Math.min(100, g.pct_complete)}%"></span></div>
-        <div class="goal-foot"><span>${rupees0(g.current_paise)} of ${rupees0(g.target_paise)}</span><span>${g.pct_complete}%</span></div>`;
-      goals.appendChild(el);
-    });
+    // The orange tile shows the first active goal; the Plan tab has the full picture.
+    const g0 = (s.goals || []).find((g) => g.status !== "paused") || (s.goals || [])[0];
+    $("#tileGoalLabel").textContent = g0 ? `Goal · ${rupees0(g0.target_paise)}${g0.status === "paused" ? " (paused)" : ""}` : "Goal";
+    $("#tileGoal").textContent = g0 ? `${g0.pct_complete}%` : "none";
 
     // The card mock in "The idea" reads the same policy the engine enforces.
     if (s.policy) {
@@ -344,9 +381,11 @@
   function renderRecent(events) {
     const ul = $("#recent"); ul.innerHTML = "";
     if (!events.length) { ul.innerHTML = `<li class="empty">No ledger activity yet.</li>`; return; }
+    const GLYPH = { CONTRIBUTION: ["↓", "in"], PURCHASE: ["↑", "out"], REWARD: ["★", "in"], POOL_PAYOUT: ["◎", "pool"], REVERSAL: ["↺", "out"] };
     events.slice(0, 6).forEach((e) => {
       const li = document.createElement("li");
-      li.innerHTML = `<span>${esc(EVENT_LABEL[e.type] || e.type)}<span class="k">${esc(e.bucket.replace(/_/g, " "))} · ${dayOf(e.at)}${/simulated/.test(e.source) ? " · simulated" : ""}</span></span><span class="amt ${e.amount_paise < 0 ? "neg" : ""}">${e.amount_paise < 0 ? "−" : "+"}${rupees0(Math.abs(e.amount_paise))}</span>`;
+      const [glyph, cls] = GLYPH[e.type] || ["·", ""];
+      li.innerHTML = `<span class="r-ico ${cls}" aria-hidden="true">${glyph}</span><span>${esc(EVENT_LABEL[e.type] || e.type)}<span class="k">${esc(e.bucket.replace(/_/g, " "))} · ${dayOf(e.at)}${/simulated/.test(e.source) ? " · simulated" : ""}</span></span><span class="amt ${e.amount_paise < 0 ? "neg" : ""}">${e.amount_paise < 0 ? "−" : "+"}${rupees0(Math.abs(e.amount_paise))}</span>`;
       ul.appendChild(li);
     });
   }
