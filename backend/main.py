@@ -17,6 +17,7 @@ from backend import config
 from backend.agent import llm_client
 from backend.api import chat as chat_routes
 from backend.api import checkout as checkout_routes
+from backend.api import autopilot as autopilot_routes
 from backend.api import debug as debug_routes
 from backend.api import intents as intent_routes
 from backend.api import state as state_routes
@@ -106,6 +107,7 @@ app.include_router(chat_routes.router)
 app.include_router(checkout_routes.router)
 app.include_router(webhook_routes.router)
 app.include_router(ui_data_routes.router)
+app.include_router(autopilot_routes.router)
 app.include_router(ui_routes.router)
 app.include_router(debug_routes.router)
 

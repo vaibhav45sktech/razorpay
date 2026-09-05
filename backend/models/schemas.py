@@ -141,6 +141,22 @@ class GetPoolStatusOut(ToolOutput):
 
 
 # ---------------------------------------------------------------------------
+# get_autopilot_plan (Phase 6)
+# ---------------------------------------------------------------------------
+
+
+class GetAutopilotPlanOut(ToolOutput):
+    """What the Autopilot screen shows, so the chat agent can explain it
+    instead of guessing. Deterministic output of autopilot_service — the
+    model reads it, it never sets it."""
+
+    this_month: dict[str, Any]
+    pool_draw: dict[str, Any] | None
+    upcoming_needs: list[dict[str, Any]]
+    note: str
+
+
+# ---------------------------------------------------------------------------
 # get_eligible_rewards
 # ---------------------------------------------------------------------------
 

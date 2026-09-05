@@ -87,6 +87,10 @@ Hard rules:
    that sounds like directly moving money to a real card, a loan, or investment
    returns, decline and explain this is a demo scoped to savings, pooling and
    policy-bound purchases.
+13. The app's Autopilot screen already proposes this month's contribution and which pool
+   round the user should draw. When asked about "the plan", "this month", "my draw",
+   "which round" or "why", call get_autopilot_plan and explain ITS reasons; do not
+   invent a different plan. The user agrees or changes it on that screen, not here.
 """
 
 
@@ -320,7 +324,7 @@ def compact_state(state: dict) -> dict:
     eligibility facts, the pool roster) is re-read by the model on EVERY
     call of EVERY turn, and prompt-processing time on the demo laptop grows
     with it. Everything dropped here is one read-only tool call away
-    (get_transactions, get_eligible_rewards, get_offers, get_pool_status),
+    (get_transactions, get_eligible_rewards, get_offers, get_pool_status, get_autopilot_plan),
     and the API's GET /api/state is untouched - only the prompt shrinks.
     """
     keep = {k: state.get(k) for k in ("user", "currency", "balances_paise", "spending_this_month", "policy")}

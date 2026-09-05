@@ -22,7 +22,6 @@ which authorises a payout only against an explainable allocation.
 
 from __future__ import annotations
 
-import dataclasses
 import math
 from datetime import datetime, timezone
 from typing import Any
@@ -33,9 +32,9 @@ from sqlalchemy.orm import Session
 from backend import config
 from backend.models.entities import (
     ActionIntent, AllocationStatus, AuditActor, Bucket, Goal, GoalStatus, IntentStatus, LedgerEvent,
-    LedgerEventType, Need, PoolAllocation, PoolCycle, PoolCycleStatus, User,
+    LedgerEventType, Need, PoolAllocation, PoolCycle, User,
 )
-from backend.services import ledger_service, policy_engine, pool_service
+from backend.services import ledger_service, offer_service, policy_engine, pool_service
 from backend.services import money_action_service as mas
 
 
@@ -73,10 +72,14 @@ def _active_goal(session: Session, user_id: str) -> Goal | None:
 
 
 def _contributed_since(session: Session, user_id: str, since: datetime) -> int:
+    """Contributions credited on/after `since` — the same month boundary
+    ledger_service.month_spend() uses, so "done this month" agrees with the
+    policy engine's own view of the month."""
     return int(session.execute(
         select(func.coalesce(func.sum(LedgerEvent.amount_paise), 0)).where(
-            LedgerEvent.user_id == user_id, LedgerEvent.type == LedgerEventType.CONTRIBUTION,
-            LedgerEvent.created_at >= since.replace(tzinfo=None) if False else LedgerEvent.created_at >= since,
+            LedgerEvent.user_id == user_id,
+            LedgerEvent.type == LedgerEventType.CONTRIBUTION,
+            LedgerEvent.created_at >= since,
         )
     ).scalar_one())
 
@@ -157,8 +160,12 @@ def monthly_plan(session: Session, user_id: str, *, now: datetime | None = None)
         "goal": None if goal is None else {
             "goal_id": goal.id, "label": goal.label, "target_paise": goal.target_amount_paise,
             "saved_paise": saved, "remaining_paise": remaining,
+            # Same formula as state_service, so the two screens never disagree.
+            "pct_complete": round(min(100.0, saved / goal.target_amount_paise * 100), 1) if goal.target_amount_paise else 0.0,
             "months_to_goal": months_to_goal, "goal_month": goal_month,
+            "goal_month_label": _month_label(goal_month) if goal_month else None,
         },
+        "month_label": _month_label(_ym(now)),
         "pending_intent": None if pending is None else {"intent_id": pending.id, "amount_paise": pending.amount_paise, "status": pending.status.value},
         "policy_preview": policy, "reasons": reasons,
         "band": {"min_paise": lo, "max_paise": hi},
@@ -219,9 +226,9 @@ def _member_label(session: Session, member_id: str, me: str) -> str:
         return "You"
     u = session.get(User, member_id)
     if u is not None:
-        return u.name
+        return u.name.split(" (")[0]          # "Diya (demo student, new account)" -> "Diya"
     tail = member_id.rsplit("_", 1)[-1]
-    return f"Member {tail} (demo)"
+    return f"Member {tail}"
 
 
 def _my_draw_allocation(session: Session, user_id: str, cycle: PoolCycle) -> PoolAllocation | None:
@@ -260,11 +267,11 @@ def pool_view(session: Session, user_id: str, *, now: datetime | None = None) ->
     others = [m for m in members if m != user_id]
     for i in range(cycle.size):
         ym = _add_months(start_ym, i)
-        past = _months_between(this_ym, ym) < 0 if ym < this_ym else False
+        past = ym < this_ym
         rounds.append({"index": i + 1, "month": ym, "label": _month_label(ym), "amount_paise": round_amount,
-                       "past": ym < this_ym, "current": ym == this_ym,
-                       "drawer": _member_label(session, others[i % len(others)], user_id) if ym < this_ym else None,
-                       "status": "drawn" if ym < this_ym else "open"})
+                       "past": past, "current": ym == this_ym,
+                       "drawer": _member_label(session, others[i % len(others)], user_id) if (past and others) else None,
+                       "status": "drawn" if past else "open"})
 
     # ---- recommendation: the latest open round on/before the first month the
     # user's needs outrun their projected savings; else the last round.
@@ -343,6 +350,8 @@ def request_round(session: Session, user_id: str, *, month: str) -> dict[str, An
     target = next((r for r in view["rounds"] if r["month"] == month), None)
     if target is None or target["past"]:
         raise ValueError("that round is not open")
+    if view["my_draw"] and view["my_draw"]["status"] == AllocationStatus.PAID.value:
+        raise ValueError("you have already drawn once this cycle")
     cycle = session.get(PoolCycle, view["cycle"]["cycle_id"])
     amount = view["round_amount_paise"]
 
@@ -387,3 +396,87 @@ def simulate_draw(session: Session, user_id: str) -> dict[str, Any]:
                        source=f"pool_payout:simulated:{intent.id}", actor=AuditActor.SYSTEM)
     return {"executed": True, "intent_id": intent.id, "status": intent.status.value, "amount_paise": amount,
             "note": "SIMULATED payout. The policy engine authorised it against your allocation; no real transfer occurred."}
+
+
+# --------------------------------------------------------------------------
+# 4. Spend: offers matched to stated needs, purchase proposals
+# --------------------------------------------------------------------------
+
+#: The categories the needs form offers. Offers in the seed use the same
+#: vocabulary, so matching is an equality test — no fuzzy guessing.
+NEED_CATEGORIES: tuple[str, ...] = (
+    "education", "food", "electronics", "fashion", "subscriptions", "travel", "health", "other",
+)
+
+
+def spend_view(session: Session, user_id: str) -> dict[str, Any]:
+    """Offers the user is eligible for, each tagged with the stated need it
+    serves (if any), plus the month's headroom under the spending rule. The
+    numbers come from the policy engine and the ledger; nothing is derived
+    on the client."""
+    if session.get(User, user_id) is None:
+        raise LookupError(user_id)
+    needs = list_needs(session, user_id)
+    by_cat: dict[str, list[dict[str, Any]]] = {}
+    for n in needs:
+        if n["category"]:
+            by_cat.setdefault(n["category"], []).append(n)
+
+    offers = []
+    for o in offer_service.list_eligible_offers(session, user_id):
+        matched = by_cat.get(o["category"] or "", [])
+        price = o["effective_price_paise"]
+        # What the policy engine WOULD say if the user tapped this offer now —
+        # the same check propose_purchase() runs for real, shown up front so
+        # the user sees "needs your approval" / "over your limit" before tapping.
+        preview = None
+        if price is not None:
+            preview = policy_engine.check_policy(
+                session, user_id=user_id, action="PURCHASE", amount_paise=int(price),
+                purpose=f"offer:{o['offer_id']}:{o['merchant']}", bucket=Bucket.DISCRETIONARY,
+            ).as_dict()
+        offers.append({
+            **o,
+            "matched_needs": [{"need_id": m["need_id"], "label": m["label"], "month": m["month"]} for m in matched],
+            "match_note": (
+                f"Matches your '{matched[0]['label']}' need ({_month_label(matched[0]['month'])})." if matched else None
+            ),
+            "policy_preview": preview,
+        })
+    # Needs-matched offers first, then by savings (list_eligible_offers already sorted by savings).
+    offers.sort(key=lambda o: (0 if o["matched_needs"] else 1))
+
+    spent = ledger_service.month_spend(session, user_id, Bucket.DISCRETIONARY)
+    cfg = policy_engine.load_config()
+    sp = session.get(User, user_id).spend_policy
+    monthly_limit = sp.monthly_limit_paise if sp is not None else cfg.default_monthly_limit_paise
+    threshold = sp.approval_threshold_paise if sp is not None else cfg.default_approval_threshold_paise
+    return {
+        "offers": offers,
+        "needs": needs,
+        "spent_this_month_paise": spent,
+        "monthly_limit_paise": monthly_limit,
+        "approval_threshold_paise": threshold,
+        "headroom_paise": max(0, monthly_limit - spent),
+        "paused": bool(sp.paused) if sp is not None else False,
+        "categories": list(NEED_CATEGORIES),
+    }
+
+
+def propose_purchase(session: Session, user_id: str, *, offer_id: str) -> dict[str, Any]:
+    """The user taps an offer -> a PURCHASE intent for its effective price,
+    run through the policy engine exactly like any other money action
+    (ALLOW / REQUIRE_APPROVAL / DENY). The approval card and Razorpay checkout
+    take it from there. Structured USER action; the model is not involved."""
+    offer = next((o for o in offer_service.list_eligible_offers(session, user_id) if o["offer_id"] == offer_id), None)
+    if offer is None:
+        raise LookupError(offer_id)
+    if offer["effective_price_paise"] is None:
+        raise ValueError("this offer has no fixed price, so there is nothing to pay yet")
+    r = mas.create(
+        session, user_id=user_id, action="PURCHASE", amount_paise=int(offer["effective_price_paise"]),
+        purpose=f"offer:{offer_id}:{offer['merchant']}", bucket=Bucket.DISCRETIONARY, actor=AuditActor.USER,
+    )
+    d = r.as_dict()
+    return {"intent_id": d["intent_id"], "status": d["status"], "amount_paise": d["amount_paise"],
+            "policy": d.get("policy"), "offer_id": offer_id, "title": offer["title"], "merchant": offer["merchant"]}

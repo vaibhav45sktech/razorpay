@@ -126,6 +126,19 @@ TOOLS: dict[str, ToolDef] = {
         handler=pool_tools.get_pool_status,
         caller=Caller.LLM,
     ),
+    "get_autopilot_plan": ToolDef(
+        name="get_autopilot_plan",
+        description=(
+            "Get what the Autopilot has already decided for this user: this month's proposed "
+            "contribution and why, the recommended pool draw round and why, and the upcoming "
+            "needs they listed. Use it to explain the plan — e.g. 'why this month for my draw?' "
+            "You cannot change the plan; the user acts on it from the Autopilot screen."
+        ),
+        args_schema=s.NoArgs,
+        output_schema=s.GetAutopilotPlanOut,
+        handler=pool_tools.get_autopilot_plan,
+        caller=Caller.LLM,
+    ),
     "get_eligible_rewards": ToolDef(
         name="get_eligible_rewards",
         description=(

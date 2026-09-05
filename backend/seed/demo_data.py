@@ -220,9 +220,20 @@ def seed_offers(session: Session) -> list[Offer]:
         ),
         Offer(
             merchant="FauxThreads (synthetic)",
-            title="10% off fashion order",
+            title="10% off a Rs.600 campus hoodie",
             category="fashion",
+            list_price_paise=600 * RUPEE,        # -> Rs.540: above the Rs.500 approval threshold
             discount_pct=10.0,
+            expiry=expiry,
+            funding_source=RewardSource.PARTNER_FUNDED,
+            eligibility={},
+        ),
+        Offer(
+            merchant="Sample Cafe (synthetic)",
+            title="Rs.50 off the Rs.350 weekly meal pass",
+            category="food",
+            list_price_paise=350 * RUPEE,        # -> Rs.300: inside the rule, no approval needed
+            discount_paise=50 * RUPEE,
             expiry=expiry,
             funding_source=RewardSource.PARTNER_FUNDED,
             eligibility={},
@@ -234,6 +245,8 @@ def seed_offers(session: Session) -> list[Offer]:
             discount_paise=50 * RUPEE,
             expiry=expiry,
             funding_source=RewardSource.PARTNER_FUNDED,
+            # Deliberately unsupported eligibility key: reward_service must
+            # hide it rather than guess (see evaluate()).
             eligibility={"min_order_paise": 300 * RUPEE},
         ),
         Offer(
@@ -247,8 +260,9 @@ def seed_offers(session: Session) -> list[Offer]:
         ),
         Offer(
             merchant="MockBooks (synthetic)",
-            title="15% off textbooks",
+            title="15% off a Rs.800 textbook bundle",
             category="education",
+            list_price_paise=800 * RUPEE,        # -> Rs.680: within the limit, needs approval
             discount_pct=15.0,
             expiry=expiry,
             funding_source=RewardSource.PARTNER_FUNDED,
@@ -266,7 +280,7 @@ def seed_offers(session: Session) -> list[Offer]:
     ]
     session.add_all(offers)
     session.flush()
-    logger.info("Seeded %d synthetic offers (1 deliberately expired)", len(offers))
+    logger.info("Seeded %d synthetic offers (1 expired, 1 with an unsupported rule - both hidden on purpose)", len(offers))
     return offers
 
 
@@ -331,6 +345,14 @@ def seed_pool(session: Session, users: list[User]) -> PoolCycle:
         is_synthetic=True,
     )
     session.add(cycle)
+    session.flush()
+    # The cycle started three months ago, matching the three seeded
+    # contributions, so the Autopilot's round timeline shows three rounds
+    # already drawn (by synthetic members) and this month as round 4.
+    now = datetime.now(timezone.utc)
+    m0 = now.month - 1 - 3
+    cycle.created_at = now.replace(year=now.year + m0 // 12, month=m0 % 12 + 1, day=1,
+                                   hour=0, minute=0, second=0, microsecond=0)
     session.flush()
 
     session.add(
