@@ -199,7 +199,7 @@ def _post_stream(messages: list[dict], fmt: dict[str, Any] | str, *, temperature
         "format": fmt,
         "stream": True,
         "keep_alive": config.OLLAMA_KEEP_ALIVE,
-        "options": {"temperature": temperature},
+        "options": {"temperature": temperature, "num_ctx": config.OLLAMA_NUM_CTX},
     }
 
     started = time.monotonic()
@@ -234,6 +234,22 @@ def _post_stream(messages: list[dict], fmt: dict[str, Any] | str, *, temperature
                 if piece:
                     content_parts.append(piece)
                 if chunk.get("done"):
+                    # Ollama's final chunk carries the real cost breakdown.
+                    # Logged so "why is it slow?" is answered by numbers:
+                    # prompt tokens (prompt-processing cost, grows with the
+                    # state snapshot + history) vs generated tokens.
+                    ptok, gtok = chunk.get("prompt_eval_count"), chunk.get("eval_count")
+                    pdur = (chunk.get("prompt_eval_duration") or 0) / 1e9
+                    gdur = (chunk.get("eval_duration") or 0) / 1e9
+                    ttft = (first_chunk_at - started) if first_chunk_at else 0.0
+                    logger.info(
+                        "llm call model=%s prompt_tokens=%s prompt_eval=%.1fs gen_tokens=%s gen=%.1fs "
+                        "ttft=%.1fs total=%.1fs",
+                        payload["model"], ptok, pdur, gtok, gdur, ttft, now - started,
+                    )
+                    if ptok and ptok >= config.OLLAMA_NUM_CTX - 256:
+                        logger.warning("prompt (%s tokens) is close to num_ctx=%s - older context may be dropped",
+                                       ptok, config.OLLAMA_NUM_CTX)
                     break
     except httpx.ConnectError as exc:
         _breaker.on_failure()

@@ -176,7 +176,10 @@ TOOLS: dict[str, ToolDef] = {
     ),
     "update_goal": ToolDef(
         name="update_goal",
-        description="Pause or resume one of this user's savings goals.",
+        description=(
+            "Pause or resume one of this user's savings goals. ONLY when the user explicitly asks to "
+            "pause/resume a goal - never as part of answering a question."
+        ),
         args_schema=s.UpdateGoalArgs,
         output_schema=s.UpdateGoalOut,
         handler=savings_tools.update_goal,

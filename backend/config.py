@@ -21,7 +21,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Load .env from the repo root, if present. Real environment variables always
 # win over .env values, which is what you want in CI or a deployed setting.
-load_dotenv(BASE_DIR / ".env", override=False)
+# utf-8-sig: Windows Notepad may prepend a byte-order mark, which would
+# otherwise corrupt the NAME of the first variable in the file (seen
+# 2026-09-05: DATABASE_URL on line 1 silently ignored, keys on later lines
+# fine, two processes opening two different databases).
+load_dotenv(BASE_DIR / ".env", override=False, encoding="utf-8-sig")
 
 
 def _get_bool(name: str, default: bool = False) -> bool:
@@ -54,6 +58,22 @@ if RAZORPAY_KEY_ID is not None and not RAZORPAY_KEY_ID.startswith("rzp_test_"):
 
 RAZORPAY_ENABLED: bool = RAZORPAY_KEY_ID is not None and RAZORPAY_KEY_SECRET is not None
 
+# Public base URL of THIS server as Razorpay must reach it (ngrok in dev).
+# Used only to print the webhook URL to register; never trusted for routing.
+PUBLIC_BASE_URL: str = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
+
+# --------------------------------------------------------------------------
+# Reconciliation (HLD s6.5 "Reconciliation job", master plan Phase 5 Step 8)
+# --------------------------------------------------------------------------
+# How often the in-process sweeper runs, and how long an intent may sit in
+# EXECUTING before the sweeper asks Razorpay for the authoritative status.
+RECONCILE_INTERVAL_SECONDS: float = float(os.environ.get("RECONCILE_INTERVAL_SECONDS", "60"))
+RECONCILE_STUCK_AFTER_SECONDS: float = float(os.environ.get("RECONCILE_STUCK_AFTER_SECONDS", "120"))
+# After this long with still no authoritative answer, the intent goes
+# UNKNOWN -> EXCEPTION and a human decides. The plan marks the exact value
+# "TODO: confirm with product owner"; 15 minutes is the placeholder.
+RECONCILE_EXCEPTION_AFTER_SECONDS: float = float(os.environ.get("RECONCILE_EXCEPTION_AFTER_SECONDS", "900"))
+
 
 # --------------------------------------------------------------------------
 # Local LLM (Ollama) — see HLD s2.6
@@ -65,6 +85,12 @@ OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b-instruct")
 # which is exactly what the 2026-09-04 adversarial run saw on its first call
 # after a reboot (degraded reply). "-1" keeps it resident until Ollama exits.
 OLLAMA_KEEP_ALIVE: str = os.environ.get("OLLAMA_KEEP_ALIVE", "60m")
+# Context window requested per call. Ollama's default is small (2048-4096
+# depending on version) and when a prompt exceeds it the OLDEST tokens are
+# silently dropped - i.e. the system prompt with all the rules. Our prompt
+# (rules + tool catalog + state) is a few thousand tokens; 8192 leaves room
+# for history and tool results. Qwen2.5 supports far more; memory is the cost.
+OLLAMA_NUM_CTX: int = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
 
 
 # --------------------------------------------------------------------------
@@ -91,8 +117,11 @@ def summary() -> dict[str, object]:
     return {
         "razorpay_enabled": RAZORPAY_ENABLED,
         "razorpay_mode": "test" if RAZORPAY_KEY_ID else "not_configured",
+        "razorpay_webhook_secret_set": RAZORPAY_WEBHOOK_SECRET is not None,
         "ollama_url": OLLAMA_URL,
         "ollama_model": OLLAMA_MODEL,
-        "database": DATABASE_URL.split("/")[-1],
+        # Full location, not just the filename: two processes on two different
+        # files is a real failure mode and must be visible from /health.
+        "database": DATABASE_URL if DATABASE_URL.startswith("sqlite") else DATABASE_URL.split("@")[-1],
         "debug": DEBUG,
     }

@@ -42,9 +42,11 @@ def get_state(session: Session, user_id: str) -> dict[str, Any]:
         if policy else None
     )
 
-    goals = session.execute(
-        select(Goal).where(Goal.user_id == user_id, Goal.status != GoalStatus.PAUSED).order_by(Goal.created_at)
-    ).scalars().all()
+    # ALL goals, paused included, each carrying its status. A paused goal
+    # that vanishes from state cannot be resumed by anyone - the UI has
+    # nothing to click and the agent has no id to pass (2026-09-05: it
+    # invented one). Callers that want only active goals filter on status.
+    goals = session.execute(select(Goal).where(Goal.user_id == user_id).order_by(Goal.created_at)).scalars().all()
     goal_views = []
     for g in goals:
         pct = round(min(100.0, emergency / g.target_amount_paise * 100), 1) if g.target_amount_paise else 0.0

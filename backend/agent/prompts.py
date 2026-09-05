@@ -80,7 +80,10 @@ Hard rules:
    is about YOUR call, not about the user. Never tell the user they "provided" something
    wrong when they didn't, and never narrate these internal mechanics ("repeated call
    restriction", "step budget") to the user - just answer their actual question.
-11. You will never be shown a real payment-execution tool. If asked to do something
+11. A question is answered with read-only tools (get_*, calculate_*, check_policy). Tools that
+   CHANGE something (update_goal, create_payment_intent) are used only when the user
+   explicitly asked for that change in their own words - never to "help" while answering.
+12. You will never be shown a real payment-execution tool. If asked to do something
    that sounds like directly moving money to a real card, a loan, or investment
    returns, decline and explain this is a demo scoped to savings, pooling and
    policy-bound purchases.
@@ -194,9 +197,10 @@ def render_state_summary(state: dict) -> str:
 
     goals = state.get("goals") or []
     for g in goals[:3]:
+        paused = " - PAUSED" if g.get("status") == "paused" else ""
         lines.append(
-            f"Goal '{g.get('label')}': {_rupees(g.get('current_paise'))} of {_rupees(g.get('target_paise'))} "
-            f"({g.get('pct_complete')}% complete)"
+            f"Goal '{g.get('label')}' (id {g.get('goal_id')}): {_rupees(g.get('current_paise'))} of "
+            f"{_rupees(g.get('target_paise'))} ({g.get('pct_complete')}% complete){paused}"
         )
 
     pending = state.get("pending_actions") or []
@@ -308,3 +312,31 @@ def redact_embedded_instructions(obj):
     if isinstance(obj, list):
         return [redact_embedded_instructions(v) for v in obj]
     return obj
+
+
+def compact_state(state: dict) -> dict:
+    """The model's copy of the state snapshot, trimmed to what it needs on
+    every turn. The full snapshot (10 recent events, every reward with its
+    eligibility facts, the pool roster) is re-read by the model on EVERY
+    call of EVERY turn, and prompt-processing time on the demo laptop grows
+    with it. Everything dropped here is one read-only tool call away
+    (get_transactions, get_eligible_rewards, get_offers, get_pool_status),
+    and the API's GET /api/state is untouched - only the prompt shrinks.
+    """
+    keep = {k: state.get(k) for k in ("user", "currency", "balances_paise", "spending_this_month", "policy")}
+    keep["goals"] = [
+        {k: g.get(k) for k in ("goal_id", "label", "target_paise", "current_paise", "pct_complete", "status")}
+        for g in (state.get("goals") or [])
+    ]
+    keep["pending_actions"] = state.get("pending_actions") or []
+    pool = state.get("pool") or {}
+    keep["pool"] = {k: pool.get(k) for k in ("cycle_id", "status", "members", "your_position", "next_payout_at")
+                    if k in pool} if pool else None
+    rewards = state.get("rewards") or []
+    keep["rewards_summary"] = {
+        "count": len(rewards),
+        "eligible": sum(1 for r in rewards if r.get("status") in ("eligible", "ELIGIBLE")),
+    }
+    keep["recent_events_count"] = len(state.get("recent_events") or [])
+    keep["demo_notice"] = state.get("demo_notice")
+    return keep

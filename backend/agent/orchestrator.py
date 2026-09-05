@@ -66,6 +66,19 @@ TURN_BUDGET_SECONDS = 75.0
 #: Tools that require the independent policy re-check before they may run.
 MONEY_TOOLS: frozenset[str] = frozenset({"create_payment_intent"})
 
+#: Non-money WRITE tools, and the words a user must have used for each
+#: argument value before the model may call them (Guardrail 5 - write
+#: provenance). 2026-09-05, Phase 5 live run: asked "What's my emergency
+#: savings balance now?", qwen2.5:7b-instruct called update_goal(pause) and
+#: paused the user's goal. Not money, so Guardrails 1-4 did not apply; the
+#: transcript is still the only evidence of what the user asked for.
+WRITE_TOOL_REQUESTS: dict[str, dict[str, tuple[str, ...]]] = {
+    "update_goal": {
+        "pause": ("pause", "hold", "stop", "freeze", "suspend"),
+        "resume": ("resume", "restart", "continue", "unpause", "reactivate", "un-pause", "start again"),
+    },
+}
+
 #: Tools that carry a user-proposed amount and therefore get the amount-
 #: provenance check (Guardrail 3). check_policy is read-only, but letting the
 #: model probe amounts the user never said is how "you can contribute ₹500!"
@@ -194,8 +207,8 @@ def run_agent_turn(
                 "Current verified state (from the ledger, not memory). For YOUR reference when "
                 "answering - do not paste it back to the user.\n"
                 f"In rupees:\n{prompts.render_state_summary(state)}\n\n"
-                "Full snapshot (all amounts already in rupees):\n"
-                f"{json.dumps(prompts.rupee_view(state), default=str)}"
+                "Snapshot (all amounts already in rupees; use tools for transactions, offers and rewards):\n"
+                f"{json.dumps(prompts.rupee_view(prompts.compact_state(state)), default=str)}"
             ),
         },
         *history,
@@ -209,6 +222,7 @@ def run_agent_turn(
 
     started = time.monotonic()
     stated = stated_amounts_paise(messages)
+    said = user_text(messages)
     #: (tool name, canonical args) -> result already returned this turn.
     calls_seen: dict[tuple[str, str], dict[str, Any]] = {}
     corrected_parrot = False
@@ -289,14 +303,21 @@ def run_agent_turn(
             result: dict[str, Any] = {"error": f"Tool '{name}' does not exist or is not available to you."}
         else:
             try:
-                # Step 2 gets explicit task framing (see prompts.render_fill_instruction);
-                # it is NOT appended to `messages`, so the transcript the model
-                # sees on later steps stays decision/tool-result shaped.
-                fill_messages = [
-                    *messages,
-                    {"role": "user", "content": prompts.render_fill_instruction(tool, user_message)},
-                ]
-                raw_args = llm_client.fill_arguments(fill_messages, tool.args_json_schema())
+                schema = tool.args_json_schema()
+                if not schema.get("properties"):
+                    # No arguments to fill: skip the second model call outright.
+                    # On the demo laptop each call is 4-7 s, and the common
+                    # read tools (balance, profile, pool) are all argument-free.
+                    raw_args = {}
+                else:
+                    # Step 2 gets explicit task framing (see prompts.render_fill_instruction);
+                    # it is NOT appended to `messages`, so the transcript the model
+                    # sees on later steps stays decision/tool-result shaped.
+                    fill_messages = [
+                        *messages,
+                        {"role": "user", "content": prompts.render_fill_instruction(tool, user_message)},
+                    ]
+                    raw_args = llm_client.fill_arguments(fill_messages, schema)
             except llm_client.LLMUnavailable as exc:
                 logger.warning("LLM unavailable filling arguments for %s (user %s): %s", name, user_id, exc)
                 return _degraded_reply(state, step)
@@ -325,7 +346,7 @@ def run_agent_turn(
                 else:
                     result = execute_tool(
                         session, user_id, tool, raw_args, stated_amounts=stated,
-                        money_locked_reason=money_locked_reason,
+                        money_locked_reason=money_locked_reason, user_said=said,
                     )
                     calls_seen[key] = result
                     if result.get("error") == "invalid_arguments":
@@ -367,6 +388,12 @@ def run_agent_turn(
     return _exhausted_reply(MAX_STEPS, state, reason="step_budget_exhausted")
 
 
+def user_text(messages: list[dict[str, Any]]) -> str:
+    """Everything the USER typed this conversation, lower-cased, for the
+    write-provenance check. Never the model's own text or tool results."""
+    return " ".join(str(m.get("content", "")) for m in messages if m.get("role") == "user").lower()
+
+
 def execute_tool(
     session: Session,
     user_id: str,
@@ -375,6 +402,7 @@ def execute_tool(
     *,
     stated_amounts: frozenset[int] = frozenset(),
     money_locked_reason: str | None = None,
+    user_said: str = "",
 ) -> dict[str, Any]:
     """Run one LLM-requested tool for real. Every call here — including
     refused and blocked ones — lands in the audit log.
@@ -443,6 +471,31 @@ def execute_tool(
             ),
         }
 
+    if tool.name in WRITE_TOOL_REQUESTS:
+        # Guardrail 5 - write provenance: a non-money write happens only if
+        # the user literally asked for that change. Default (no user text
+        # passed) is to block: too strict, never permissive.
+        wanted = getattr(parsed, "event", None)
+        verbs = WRITE_TOOL_REQUESTS[tool.name].get(str(wanted), ())
+        if not any(v in user_said for v in verbs):
+            verdict = {
+                "decision": "BLOCKED",
+                "rule": "change_not_requested_by_user",
+                "reason": (
+                    f"The user did not ask to {wanted} anything in this conversation. The agent may not "
+                    "change the user's goals or settings on its own initiative."
+                ),
+                "details": {"tool": tool.name, "event": wanted, "expected_one_of": list(verbs)},
+            }
+            audit_service.write(
+                session, actor=AuditActor.LLM, action=f"blocked_unrequested_write:{tool.name}", user_id=user_id,
+                inputs=raw_args, policy_result=verdict,
+            )
+            return {
+                "blocked": True, "decision": "BLOCKED", "reason": verdict["reason"],
+                "hint": "Only call this tool when the user explicitly asks for that change. Answer the user's actual question.",
+            }
+
     if tool.name in AMOUNT_TOOLS:
         amount_paise = getattr(parsed, "amount_paise")
         purpose = getattr(parsed, "purpose")
@@ -508,7 +561,27 @@ def execute_tool(
             )
             return {"blocked": True, "decision": allow.decision.value, "reason": allow.reason}
 
-    output = tool.handler(session, user_id, parsed)
+    try:
+        output = tool.handler(session, user_id, parsed)
+    except (LookupError, PermissionError, ValueError) as exc:
+        # A handler refusing its input (unknown/foreign goal id, unsupported
+        # value) is a normal tool outcome the model must see and recover
+        # from - not a 500. 2026-09-05: the model invented a goal id for a
+        # goal that state had hidden (paused), LookupError went uncaught,
+        # and the whole chat turn failed. Anything else (a real bug) still
+        # propagates: chat.py rolls back and the traceback is visible.
+        audit_service.write(
+            session, actor=AuditActor.LLM, action=f"tool_error:{tool.name}", user_id=user_id, inputs=raw_args,
+            policy_result={"error": type(exc).__name__, "detail": str(exc)[:200]},
+        )
+        return {
+            "error": "tool_failed",
+            "detail": f"{type(exc).__name__}: {str(exc)[:200]}",
+            "fix": (
+                "Use only ids that appear in the state snapshot or in an earlier tool result this turn. "
+                "If you don't have the right id, tell the user what you found instead of guessing."
+            ),
+        }
     result = output.model_dump() if isinstance(output, BaseModel) else output
 
     audit_service.write(
