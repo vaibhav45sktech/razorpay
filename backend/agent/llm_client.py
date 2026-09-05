@@ -161,8 +161,26 @@ class _CircuitBreaker:
         self._consecutive_failures = 0
         self._open_until = None
 
+    def state(self) -> dict[str, Any]:
+        """Read-only view for /health/ready. Reports whether the breaker is
+        currently refusing calls without making one — probing the model just to
+        answer a health check would defeat the point of the breaker."""
+        remaining = 0.0
+        if self._open_until is not None:
+            remaining = max(0.0, self._open_until - time.monotonic())
+        return {
+            "open": remaining > 0,
+            "consecutive_failures": self._consecutive_failures,
+            "cooldown_remaining_s": round(remaining, 1),
+        }
+
 
 _breaker = _CircuitBreaker(CIRCUIT_FAILURE_THRESHOLD, CIRCUIT_COOLDOWN_SECONDS)
+
+
+def circuit_state() -> dict[str, Any]:
+    """What the breaker is doing right now (used by /health/ready)."""
+    return _breaker.state()
 
 
 def reset_circuit_breaker() -> None:

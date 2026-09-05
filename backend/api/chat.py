@@ -13,11 +13,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from backend import observability
 from backend.agent import orchestrator
 from backend.models.db import get_session
 from backend.services import state_service
@@ -63,7 +64,13 @@ class ChatResponse(BaseModel):
 
 
 @router.post("/chat")
-def chat(body: ChatRequest, session: Session = Depends(get_session)) -> ChatResponse:
+@observability.limiter.limit("12/minute", key_func=observability._chat_key)
+def chat(request: Request, body: ChatRequest, session: Session = Depends(get_session)) -> ChatResponse:
+    """Rate limited PER USER, not per IP (Phase 8 item 1): every call is
+    several inference passes against one local model, so this is the endpoint
+    an abuser would target and the one where a handful of callers is a denial
+    of service against every other student. `request` is in the signature
+    because slowapi needs it; the handler itself does not use it."""
     history = [
         {"role": m.role, "content": m.content} for m in body.history if m.role in _TRUSTED_HISTORY_ROLES
     ]

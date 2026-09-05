@@ -13,7 +13,6 @@ guardrails hold no matter what the model says.
 from __future__ import annotations
 
 import pytest
-import yaml
 
 from benchmark import run_benchmark as bench
 

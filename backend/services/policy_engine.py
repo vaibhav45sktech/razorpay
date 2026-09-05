@@ -171,16 +171,30 @@ class PolicyResult:
         }
 
 
+def _count(result: PolicyResult) -> PolicyResult:
+    """Every verdict this engine returns is counted for /metrics (Phase 8
+    item 3). Done in the three constructors rather than at call sites, so a
+    future rule cannot be added and silently escape the metric. Import is
+    local and failure is swallowed: the policy engine must stay pure and
+    must never fail to decide because a counter is unhappy."""
+    try:
+        from backend.observability import POLICY_DECISIONS
+        POLICY_DECISIONS.labels(result.decision.value, result.rule).inc()
+    except Exception:  # noqa: BLE001
+        pass
+    return result
+
+
 def _deny(rule: str, reason: str, **details: Any) -> PolicyResult:
-    return PolicyResult(PolicyDecision.DENY, reason, rule, details)
+    return _count(PolicyResult(PolicyDecision.DENY, reason, rule, details))
 
 
 def _allow(reason: str, **details: Any) -> PolicyResult:
-    return PolicyResult(PolicyDecision.ALLOW, reason, "ok", details)
+    return _count(PolicyResult(PolicyDecision.ALLOW, reason, "ok", details))
 
 
 def _require_approval(reason: str, **details: Any) -> PolicyResult:
-    return PolicyResult(PolicyDecision.REQUIRE_APPROVAL, reason, "approval_threshold", details)
+    return _count(PolicyResult(PolicyDecision.REQUIRE_APPROVAL, reason, "approval_threshold", details))
 
 
 def _rupees(paise: int) -> str:

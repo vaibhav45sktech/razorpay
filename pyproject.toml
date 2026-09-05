@@ -1,0 +1,63 @@
+# Tooling config. Dependencies stay pinned in requirements.txt (the file the
+# README tells you to install), so this holds lint/type settings only.
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"   # the floor requirements.txt claims and CI tests
+exclude = [".venv", "venv", "scratch", ".pytest_cache", "frontend"]
+
+[tool.ruff.lint]
+# E/F/W only, deliberately. These are the families that catch real defects:
+# undefined names, unused imports, shadowed bindings, syntax-adjacent mistakes
+# — the class of thing that is a bug rather than a preference. The stylistic
+# families (I, UP, B, C4, SIM) flag ~170 findings in this codebase, none of
+# them defects, and reflowing every file to satisfy them at Phase 8 would be a
+# day of churn against a deadline for no safety gain. Turning them on is a
+# reasonable thing to do later, on purpose, in its own commit.
+select = ["E", "F", "W"]
+ignore = [
+  # Line length. 111 lines in this codebase exceed 120 chars (up to 195),
+  # including payment and reconciliation code written well before this phase.
+  # Reflowing those by hand against a deadline is a real risk of introducing a
+  # defect into the money path in exchange for a formatting preference, so the
+  # rule is off and the substantive checks below stay blocking. A deliberate
+  # `ruff format` pass is the right way to do this, in its own commit, when
+  # nothing is due.
+  "E501",
+  # Compact one-liners. This codebase uses `a = 1; b = 2` for test setup and
+  # small paired assignments where the pair reads as ONE fact ("pin both
+  # platforms", "close both connections"). Splitting them adds lines without
+  # adding clarity, so the style is chosen rather than tolerated.
+  "E702",
+  # Bare `except Exception` is deliberate in exactly three places, each
+  # commented: a background loop that must survive its own errors, a metrics
+  # counter that must never break the thing it counts, and a health check that
+  # reports instead of raising. `noqa: BLE001` marks each one.
+  "BLE001",
+  # Assert is how tests express intent, and a couple of internal invariants.
+  "S101",
+  # Long messages in raise/reason strings are the product here: policy reasons
+  # are shown to the user verbatim, so they live where they are read.
+  "TRY003", "EM101", "EM102",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests import fixtures and models locally, shadow names freely, and use
+# compact setup lines throughout.
+"backend/tests/*" = ["E501", "F811", "SIM117"]
+# The benchmark's checker is a long declarative if-chain by design: one
+# `if "key" in expect` per assertion, read top to bottom against the YAML.
+"benchmark/run_benchmark.py" = ["C901", "PLR0912", "E731"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend", "benchmark", "scripts"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+# Not strict. This codebase is annotated for readability, not proved; turning
+# on strict mode at Phase 8 would be a day of churn for no safety gain, and
+# the safety properties are enforced by tests and the policy engine, not by
+# the type checker. CI reports mypy without blocking on it.
+warn_unused_ignores = true
+warn_redundant_casts = true

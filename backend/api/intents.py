@@ -7,10 +7,11 @@ needed; only a call to these endpoints can grant it.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
+from backend import observability
 from backend.models.db import get_session
 from backend.services import money_action_service as mas
 from backend.services import razorpay_adapter
@@ -58,7 +59,9 @@ def deny(intent_id: str, body: ApprovalBody, session: Session = Depends(get_sess
 
 
 @router.post("/{intent_id}/execute")
-def execute(intent_id: str, body: ApprovalBody, session: Session = Depends(get_session)) -> dict:
+@observability.limiter.limit("20/minute")
+def execute(request: Request, intent_id: str, body: ApprovalBody,
+            session: Session = Depends(get_session)) -> dict:
     """ALLOWED/APPROVED -> EXECUTING by creating a Razorpay TEST-MODE order
     (HLD s6.4). Returns what the browser needs to open Checkout: order id,
     amount, currency and the PUBLIC key id. Idempotent - see

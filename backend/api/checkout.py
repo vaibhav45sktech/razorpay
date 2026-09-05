@@ -19,7 +19,6 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from backend import config
 from backend.models.db import get_session
 from backend.models.entities import AuditActor, ExceptionKind
 from backend.services import audit_service, exception_service, razorpay_adapter, webhook_service

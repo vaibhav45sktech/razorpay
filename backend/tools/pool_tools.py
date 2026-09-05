@@ -8,10 +8,20 @@ enforced structurally by test_pool_invariant.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy.orm import Session
 
 from backend.models.schemas import GetAutopilotPlanOut, GetPoolStatusOut, NoArgs
 from backend.services import pool_service
+
+if TYPE_CHECKING:
+    # Imported for annotations only. The handlers below import these at call
+    # time to keep this module's import graph free of the Agentic Card service,
+    # but an annotation still has to name something resolvable.
+    from backend.models.schemas import (
+        CreatePurchaseRuleArgs, CreatePurchaseRuleOut, GetAgentCardOut,
+    )
 
 
 def get_pool_status(session: Session, user_id: str, args: NoArgs) -> GetPoolStatusOut:

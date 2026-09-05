@@ -49,7 +49,7 @@ def test_audit_chain_survives_a_full_agent_turn(db, aarav, monkeypatch) -> None:
         ],
     )
 
-    reply = orchestrator.run_agent_turn(db, aarav.id, "add ₹300 to my savings")
+    orchestrator.run_agent_turn(db, aarav.id, "add ₹300 to my savings")
     db.commit()
 
     chain = audit_service.verify_chain(db)

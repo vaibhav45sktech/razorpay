@@ -120,6 +120,13 @@ DATABASE_URL: str = os.environ.get("DATABASE_URL", f"sqlite:///{BASE_DIR / 'camp
 # MUST be false once real Razorpay is wired in Phase 5.
 DEBUG: bool = _get_bool("DEBUG", default=True)
 
+# Phase 8: structured JSON logs for a collector; human-readable on a laptop,
+# where a person is reading the terminal and JSON is strictly worse.
+JSON_LOGS: bool = _get_bool("JSON_LOGS", default=False)
+# Rate limits are on by default and can be disabled for load testing the
+# endpoints themselves (a load test that measures the limiter measures nothing).
+RATE_LIMITS_ENABLED: bool = _get_bool("RATE_LIMITS_ENABLED", default=True)
+
 # Currency: every amount in this codebase is an integer number of paise.
 # 500 rupees == 50000 paise. Razorpay's API also uses paise, which removes a
 # whole class of float/conversion bugs. See HLD s2.2.
@@ -138,4 +145,6 @@ def summary() -> dict[str, object]:
         # files is a real failure mode and must be visible from /health.
         "database": DATABASE_URL if DATABASE_URL.startswith("sqlite") else DATABASE_URL.split("@")[-1],
         "debug": DEBUG,
+        "json_logs": JSON_LOGS,
+        "rate_limits_enabled": RATE_LIMITS_ENABLED,
     }

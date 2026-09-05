@@ -1,0 +1,169 @@
+# CI (master build plan Phase 8 item 5).
+#
+# The secret-hygiene job runs FIRST and blocks everything else. Part A of the
+# playbook currently asks a human to remember to grep for `rzp_live` and a
+# committed `.env` before every commit; this is the automated version of that
+# check, and the whole point is that it does not depend on anyone remembering.
+#
+# The benchmark runs here too (scripted mode, no Ollama), so a regression that
+# would drop a PRD §6.1 metric fails the build on the commit that caused it
+# rather than on the morning of the demo.
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  # No Ollama and no Razorpay in CI. Both absences are normal and handled by
+  # degraded mode; docs/degradation_matrix.md and test_degradation.py cover it.
+  DEBUG: "true"
+
+jobs:
+  # -------------------------------------------------------------------------
+  secrets:
+    name: Secret hygiene (blocks everything)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # gitleaks needs history, not just the tip
+
+      - name: No live Razorpay key in any tracked file
+        run: |
+          # The one product rule that must never regress (PRD §11): this
+          # prototype is Test Mode only. A live KEY in the tree is a
+          # build-failing event, not a review comment.
+          #
+          # Matches a key-SHAPED string (rzp_live_ + at least 6 key chars),
+          # not the bare token, because the build plan, the playbook and the
+          # readiness doc all discuss `rzp_live` in prose - and a check that
+          # fails the build on the documentation describing the check is a
+          # check nobody keeps. Markdown and the test that deliberately feeds
+          # a fake live key to the guard are excluded for the same reason.
+          # Only tracked files are scanned: .pytest_cache and friends are not
+          # the deliverable.
+          hits=$(git ls-files -z \
+            | grep -zv '\.md$' \
+            | grep -zv '^backend/tests/test_config\.py$' \
+            | xargs -0 grep -In 'rzp_live_[A-Za-z0-9]\{6,\}' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::A live Razorpay key is present. This prototype is Test Mode only."
+            exit 1
+          fi
+          echo "ok: no live key in any tracked file"
+
+      - name: .env is not committed, and never was
+        run: |
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "::error::.env is tracked by git. Remove it and rotate the keys."
+            exit 1
+          fi
+          # A file deleted in a later commit is still in history, and so are
+          # the keys in it. Checking the tip only would miss exactly the case
+          # that matters.
+          if [ -n "$(git log --all --full-history --oneline -- .env)" ]; then
+            echo "::error::.env appears in git history. Rotate every key it held."
+            git log --all --full-history --oneline -- .env
+            exit 1
+          fi
+          echo "ok: .env absent from the index and from history"
+
+      - name: The Test Mode guard is still in config.py
+        run: |
+          # Deleting the startup guard would be a silent removal of the only
+          # thing stopping a live key from booting the server.
+          grep -q 'rzp_test_' backend/config.py || {
+            echo "::error::The rzp_test_ startup guard is missing from backend/config.py"; exit 1; }
+          echo "ok: startup guard present"
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true   # advisory here; the checks above are the gate
+
+  # -------------------------------------------------------------------------
+  test:
+    name: Tests (py${{ matrix.python }})
+    needs: secrets
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor and a current release. requirements.txt claims 3.10+, so
+        # 3.10 is tested rather than assumed.
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: pytest
+        run: python -m pytest -q
+
+  # -------------------------------------------------------------------------
+  benchmark:
+    name: Benchmark (scripted, no model)
+    needs: secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Frozen case-set digest
+        run: |
+          echo "case set: $(python -m benchmark.run_benchmark --hash)"
+          echo "README and docs/benchmark_results.md must quote this digest."
+      - name: Run it
+        # Exits non-zero if any PRD §6.1 target is missed.
+        run: python -m benchmark.run_benchmark --json benchmark-metrics.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-metrics
+          path: benchmark-metrics.json
+
+  # -------------------------------------------------------------------------
+  lint:
+    name: Lint, types, audit
+    needs: secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt ruff mypy pip-audit
+
+      - name: ruff
+        run: ruff check backend benchmark scripts
+
+      - name: mypy
+        # Advisory: this codebase is annotated but not strict-clean, and a
+        # blocking type gate added at Phase 8 would be a day of churn for no
+        # safety gain. Reported so the debt stays visible.
+        run: mypy backend --ignore-missing-imports --no-error-summary
+        continue-on-error: true
+
+      - name: pip-audit
+        run: pip-audit --strict --requirement requirements.txt
+        continue-on-error: true   # a new CVE in a pin should inform, not block a demo

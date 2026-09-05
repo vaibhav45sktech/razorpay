@@ -21,7 +21,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from backend.models.entities import ActionIntent, AuditActor, ExceptionKind, IntentStatus, WebhookEvent
+from backend.models.entities import AuditActor, ExceptionKind, IntentStatus, WebhookEvent
 from backend.services import audit_service, exception_service
 from backend.services import money_action_service as mas
 

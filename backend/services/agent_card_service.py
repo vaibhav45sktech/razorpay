@@ -50,7 +50,7 @@ from backend.models.entities import (
     Notification, NotificationKind, PriceTick, PurchaseRule, RuleStatus, SpendPolicy, User, VirtualCard,
     WatchedProduct,
 )
-from backend.services import audit_service, ledger_service, policy_engine
+from backend.services import audit_service, ledger_service
 from backend.services import money_action_service as mas
 
 logger = logging.getLogger("campuspool.card")

@@ -171,6 +171,12 @@ def transition(
     intent.updated_at = datetime.now(timezone.utc)
     session.flush()
     logger.info("intent %s %s -> %s", intent.id, current.value, to.value)
+    try:    # /metrics, Phase 8 item 3 - counted here because this is the ONLY
+            # place a status is ever assigned, so no transition can escape it.
+        from backend.observability import INTENT_TRANSITIONS
+        INTENT_TRANSITIONS.labels(to.value).inc()
+    except Exception:  # noqa: BLE001 - never let a counter break a transition
+        pass
     return intent
 
 

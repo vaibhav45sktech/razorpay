@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend import config
-from backend.models.entities import Bucket, Goal, GoalStatus, Notification, PurchaseRule, RuleStatus, User
+from backend.models.entities import Bucket, Goal, Notification, PurchaseRule, RuleStatus, User
 from backend.services import ledger_service, money_action_service, pool_service, reward_service
 
 

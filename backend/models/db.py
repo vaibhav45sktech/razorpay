@@ -47,6 +47,31 @@ def _make_engine(url: str) -> Engine:
             # Seen 2026-09-04: "database is locked" -> 500 on the first audit
             # write of a chat turn, with the demo DB inside OneDrive.
             cursor.execute("PRAGMA busy_timeout=15000")
+
+            # Phase 8 item 7: WAL is the real concurrency fix here. In the
+            # default rollback-journal mode a single writer blocks every
+            # reader, and this app writes on a timer (the reconciliation
+            # sweeper and the Agentic Card monitor) while the browser polls
+            # /api/state every few seconds - so readers were queueing behind
+            # a background write for no reason. Under WAL readers never block
+            # the writer and the writer never blocks readers.
+            #
+            # Skipped for in-memory databases: WAL needs real files, and every
+            # test uses sqlite:// (no path), where the pragma is meaningless.
+            #
+            # NOT set for a database inside a synced folder without thought:
+            # WAL adds -wal and -shm sidecar files, and a sync client that
+            # copies the main file without them can produce a torn snapshot.
+            # The README tells you to keep the DB outside OneDrive; that
+            # instruction is load-bearing for this pragma.
+            if not url.endswith(":memory:") and url != "sqlite://":
+                cursor.execute("PRAGMA journal_mode=WAL")
+                # Durability trade: WAL + NORMAL fsyncs at checkpoints rather
+                # than every commit. A power cut can lose the last commits but
+                # cannot corrupt the file. Correct for a demo whose database is
+                # reproducible from seed in seconds; a real deployment holding
+                # the only copy of financial history would use FULL.
+                cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.close()
 
     return engine

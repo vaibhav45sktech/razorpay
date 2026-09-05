@@ -13,13 +13,14 @@ from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
 
-from backend import config
+from backend import config, observability
 from backend.agent import llm_client
 from backend.api import chat as chat_routes
 from backend.api import checkout as checkout_routes
 from backend.api import autopilot as autopilot_routes
 from backend.api import card as card_routes
 from backend.api import debug as debug_routes
+from backend.api import health as health_routes
 from backend.api import intents as intent_routes
 from backend.api import state as state_routes
 from backend.api import ui as ui_routes
@@ -124,6 +125,9 @@ app = FastAPI(
 )
 
 
+# Rate limiting, request-id logging and /metrics (Phase 8 items 1-3).
+observability.install(app, json_logs=config.JSON_LOGS, enable_limits=config.RATE_LIMITS_ENABLED)
+
 app.include_router(state_routes.router)
 app.include_router(intent_routes.router)
 app.include_router(chat_routes.router)
@@ -134,9 +138,6 @@ app.include_router(autopilot_routes.router)
 app.include_router(card_routes.router)
 app.include_router(ui_routes.router)
 app.include_router(debug_routes.router)
+app.include_router(health_routes.router)
 
-
-@app.get("/health")
-def health() -> dict[str, object]:
-    """Liveness probe. Also surfaces non-secret config for quick sanity checks."""
-    return {"status": "ok", "config": config.summary()}
+# /health and /health/ready live in api/health.py (Phase 8 item 4).

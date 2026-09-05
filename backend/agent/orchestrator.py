@@ -260,12 +260,14 @@ def run_agent_turn(
             decision = llm_client.decide(messages, tool_names)
         except llm_client.LLMUnavailable as exc:
             logger.warning("LLM unavailable mid-turn for user %s: %s", user_id, exc)
-            return _degraded_reply(state, step)
+            return _degraded_reply(state, step, session=session, user_id=user_id,
+                                   cause="llm_unavailable", detail=str(exc))
         except llm_client.LLMMalformedOutput as exc:
             # A model that cannot even produce a valid routing decision after
             # llm_client's own retry is not usefully steerable this turn.
             logger.warning("LLM malformed routing decision for user %s: %s", user_id, exc)
-            return _degraded_reply(state, step)
+            return _degraded_reply(state, step, session=session, user_id=user_id,
+                                   cause="llm_malformed_decision", detail=str(exc))
 
         if decision.action == "final_answer":
             reply_text = (decision.final_text or "").strip()
@@ -343,7 +345,8 @@ def run_agent_turn(
                     raw_args = llm_client.fill_arguments(fill_messages, schema)
             except llm_client.LLMUnavailable as exc:
                 logger.warning("LLM unavailable filling arguments for %s (user %s): %s", name, user_id, exc)
-                return _degraded_reply(state, step)
+                return _degraded_reply(state, step, session=session, user_id=user_id,
+                                       cause="llm_unavailable_filling_arguments", detail=f"{name}: {exc}")
             except llm_client.LLMMalformedOutput as exc:
                 result = {"error": "invalid_arguments", "detail": f"could not parse arguments: {exc}"}
             else:
@@ -631,11 +634,33 @@ def execute_tool(
     return result
 
 
-def _degraded_reply(state: dict[str, Any], steps: int) -> AgentReply:
+def _degraded_reply(
+    state: dict[str, Any],
+    steps: int,
+    *,
+    session: Session | None = None,
+    user_id: str | None = None,
+    cause: str = "llm_unavailable",
+    detail: str = "",
+) -> AgentReply:
     """HLD s2.8 / Production Readiness s3.1: if the model is unreachable or
     too slow, the caller still gets real ledger state — balances, goals and
     offers stay visible with the LLM completely dead. This is the difference
-    between "the AI is slow" and "the app is broken"."""
+    between "the AI is slow" and "the app is broken".
+
+    The outage is AUDITED, not merely logged. The product claims this in the
+    UI ("the outage itself is recorded in the audit trail", FAQ) and a claim
+    the code does not honour is worse than no claim — found by
+    test_the_outage_itself_is_recorded, Phase 8 item 8. It also means "the
+    model was down for six minutes this afternoon" is answerable after the
+    fact from the same trail everything else is judged by.
+    """
+    if session is not None:
+        audit_service.write(
+            session, actor=AuditActor.SYSTEM, action=f"degraded_reply:{cause}", user_id=user_id,
+            policy_result={"cause": cause, "detail": detail[:200], "steps": steps,
+                           "note": "verified ledger state returned; nothing was executed"},
+        )
     return AgentReply(text=_UNAVAILABLE_TEXT, steps=steps, degraded=True, state=state)
 
 

@@ -21,9 +21,7 @@ from __future__ import annotations
 from sqlalchemy import func, inspect, select
 
 from backend.models.entities import (
-    ActionIntent,
     AllocationStatus,
-    Base,
     Bucket,
     LedgerEvent,
     LedgerEventType,
