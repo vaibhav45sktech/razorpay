@@ -298,6 +298,12 @@
       goals.appendChild(el);
     });
 
+    // The card mock in "The idea" reads the same policy the engine enforces.
+    if (s.policy) {
+      $("#rcThreshold").textContent = rupees0(s.policy.approval_threshold_paise);
+      $("#rcLimit").textContent = rupees0(s.policy.monthly_limit_paise);
+    }
+
     renderPending(s.pending_actions || []);
     renderRecent(s.recent_events || []);
     renderDonut(b, sp);
