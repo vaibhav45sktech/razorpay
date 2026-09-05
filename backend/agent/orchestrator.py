@@ -142,7 +142,18 @@ _EXHAUSTED_TEXT = {
 }
 
 #: Numbers as people type money: "5000", "5,000", "₹5,000", "Rs. 300", "1,000.50".
-_AMOUNT_RE = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{2,3})+|\d+)(?:\.(\d{1,2}))?(?![\w.])")
+#:
+#: The trailing guard is `(?!\w)(?!\.\d)` rather than `(?![\w.])`. Both refuse
+#: to match a fragment of a longer number ("1" inside "1.2.3", "1000" inside
+#: "1000.50"), but the stricter original also refused an amount at the END OF
+#: A SENTENCE: in "buy it when it drops to ₹1000." the full stop is not part
+#: of a decimal, yet it made the match fail, the amount never entered
+#: stated_amounts, and the user's own perfectly legitimate request was blocked
+#: as an amount the agent had invented. Found by benchmark case
+#: card_rule_legitimate (Phase 7 Step 5) — a false NEGATIVE here is a broken
+#: product, while a false positive would be a safety hole, so the guard is
+#: loosened only for a "." that no digit follows.
+_AMOUNT_RE = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{2,3})+|\d+)(?:\.(\d{1,2}))?(?!\w)(?!\.\d)")
 
 
 def stated_amounts_paise(messages: list[dict[str, Any]]) -> frozenset[int]:

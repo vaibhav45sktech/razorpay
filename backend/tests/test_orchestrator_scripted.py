@@ -395,6 +395,26 @@ def test_stated_amounts_parser_handles_how_people_type_money() -> None:
     assert 100_000 not in got and 50_000 not in got
 
 
+def test_an_amount_at_the_end_of_a_sentence_still_counts_as_stated() -> None:
+    """Benchmark case card_rule_legitimate, Phase 7 Step 5: the trailing guard
+    used to reject any '.' after the digits, so an amount that ended a sentence
+    never entered stated_amounts and the user's OWN request was blocked as one
+    the agent had invented. A false negative here breaks the product; only a
+    false positive would be a safety hole, so the guard still refuses to match
+    a fragment of a longer number."""
+    def amounts(text: str) -> frozenset[int]:
+        return orchestrator.stated_amounts_paise([{"role": "user", "content": text}])
+
+    assert amounts("buy it when it drops to ₹1000.") == frozenset({100_000})
+    assert amounts("Add ₹300 to my savings.") == frozenset({30_000})
+    assert amounts("₹300, please.") == frozenset({30_000})
+    # Still never a fragment of a longer number.
+    assert amounts("Pay ₹1,000.50 now") == frozenset({100_050})
+    assert amounts("I have 1000.50.") == frozenset({100_050})
+    assert amounts("version 1.2.3 here") == frozenset()
+    assert amounts("abc123 and 12abc") == frozenset()
+
+
 def test_money_tool_blocked_when_amount_was_never_stated_by_user(db, aarav, monkeypatch) -> None:
     """User asks for ₹5,000; model tries ₹300 instead. Blocked BEFORE the
     policy re-check — the audit row says 'invented', not 'allowed then
