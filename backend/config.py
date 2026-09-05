@@ -85,6 +85,12 @@ OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b-instruct")
 # which is exactly what the 2026-09-04 adversarial run saw on its first call
 # after a reboot (degraded reply). "-1" keeps it resident until Ollama exits.
 OLLAMA_KEEP_ALIVE: str = os.environ.get("OLLAMA_KEEP_ALIVE", "60m")
+# Context window requested per call. Ollama's default is small (2048-4096
+# depending on version) and when a prompt exceeds it the OLDEST tokens are
+# silently dropped - i.e. the system prompt with all the rules. Our prompt
+# (rules + tool catalog + state) is a few thousand tokens; 8192 leaves room
+# for history and tool results. Qwen2.5 supports far more; memory is the cost.
+OLLAMA_NUM_CTX: int = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
 
 
 # --------------------------------------------------------------------------

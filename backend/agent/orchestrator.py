@@ -207,8 +207,8 @@ def run_agent_turn(
                 "Current verified state (from the ledger, not memory). For YOUR reference when "
                 "answering - do not paste it back to the user.\n"
                 f"In rupees:\n{prompts.render_state_summary(state)}\n\n"
-                "Full snapshot (all amounts already in rupees):\n"
-                f"{json.dumps(prompts.rupee_view(state), default=str)}"
+                "Snapshot (all amounts already in rupees; use tools for transactions, offers and rewards):\n"
+                f"{json.dumps(prompts.rupee_view(prompts.compact_state(state)), default=str)}"
             ),
         },
         *history,
@@ -303,14 +303,21 @@ def run_agent_turn(
             result: dict[str, Any] = {"error": f"Tool '{name}' does not exist or is not available to you."}
         else:
             try:
-                # Step 2 gets explicit task framing (see prompts.render_fill_instruction);
-                # it is NOT appended to `messages`, so the transcript the model
-                # sees on later steps stays decision/tool-result shaped.
-                fill_messages = [
-                    *messages,
-                    {"role": "user", "content": prompts.render_fill_instruction(tool, user_message)},
-                ]
-                raw_args = llm_client.fill_arguments(fill_messages, tool.args_json_schema())
+                schema = tool.args_json_schema()
+                if not schema.get("properties"):
+                    # No arguments to fill: skip the second model call outright.
+                    # On the demo laptop each call is 4-7 s, and the common
+                    # read tools (balance, profile, pool) are all argument-free.
+                    raw_args = {}
+                else:
+                    # Step 2 gets explicit task framing (see prompts.render_fill_instruction);
+                    # it is NOT appended to `messages`, so the transcript the model
+                    # sees on later steps stays decision/tool-result shaped.
+                    fill_messages = [
+                        *messages,
+                        {"role": "user", "content": prompts.render_fill_instruction(tool, user_message)},
+                    ]
+                    raw_args = llm_client.fill_arguments(fill_messages, schema)
             except llm_client.LLMUnavailable as exc:
                 logger.warning("LLM unavailable filling arguments for %s (user %s): %s", name, user_id, exc)
                 return _degraded_reply(state, step)

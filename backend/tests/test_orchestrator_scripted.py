@@ -368,7 +368,7 @@ def test_model_sees_rupee_summary_before_raw_state(db, aarav, monkeypatch) -> No
     # Summary precedes the full snapshot, and the snapshot is the same state
     # the UI gets — rendered in rupees, with no paise field left for the
     # model to misread (2026-09-04 run, scenario 2d turn 4).
-    assert content.index("In rupees:") < content.index("Full snapshot")
+    assert content.index("In rupees:") < content.index("Snapshot (")
     assert '"balances_rupees"' in content
     assert "_paise" not in content
 
@@ -991,3 +991,61 @@ def test_paused_goal_remains_visible_in_state_with_its_status(db, aarav) -> None
     assert mine and mine[0]["status"] == "paused"
     from backend.agent import prompts
     assert "PAUSED" in prompts.render_state_summary(state) and gid in prompts.render_state_summary(state)
+
+
+# ---------------------------------------------------------------------------
+# Latency work (2026-09-05): no fill call for argument-free tools; compact
+# state for the model; num_ctx sent explicitly.
+# ---------------------------------------------------------------------------
+
+
+def test_argument_free_tools_skip_the_fill_call(db, aarav, monkeypatch) -> None:
+    fills: list = []
+    monkeypatch.setattr(llm_client, "fill_arguments", lambda m, s: fills.append(s) or {})
+    _script_decide(monkeypatch, [_call("get_wallet_or_ledger"), _final("₹1,500.")])
+    orchestrator.run_agent_turn(db, aarav.id, "balance?")
+    assert fills == [], "no second model call for a tool with no arguments"
+    assert "tool:get_wallet_or_ledger" in _audit_actions(db, aarav.id)
+
+
+def test_tools_with_arguments_still_get_the_fill_call(db, aarav, monkeypatch) -> None:
+    fills: list = []
+
+    def fake_fill(m, s):
+        fills.append(s)
+        return {"action": "PURCHASE", "amount_rupees": 5000, "purpose": "purchase:bag"}
+
+    monkeypatch.setattr(llm_client, "fill_arguments", fake_fill)
+    _script_decide(monkeypatch, [_call("check_policy"), _final("denied")])
+    orchestrator.run_agent_turn(db, aarav.id, "pay ₹5,000 for a bag")
+    assert len(fills) == 1
+
+
+def test_compact_state_keeps_money_facts_and_drops_bulk(db, aarav) -> None:
+    from backend.agent import prompts
+    from backend.services import state_service
+
+    full = state_service.get_state(db, aarav.id)
+    small = prompts.compact_state(full)
+    assert small["balances_paise"] == full["balances_paise"]
+    assert small["spending_this_month"] == full["spending_this_month"]
+    assert [g["goal_id"] for g in small["goals"]] == [g["goal_id"] for g in full["goals"]]
+    assert "recent_events" not in small and "offers" not in small
+    assert small["recent_events_count"] == len(full["recent_events"])
+    assert len(json.dumps(small)) < len(json.dumps(full)) * 0.6
+
+
+def test_num_ctx_is_sent_to_ollama(monkeypatch) -> None:
+    import httpx
+    from backend import config
+
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, text=json.dumps({"message": {"content": "{}"}, "done": True,
+                                                     "prompt_eval_count": 1200, "eval_count": 20}) + "\n")
+
+    monkeypatch.setattr(llm_client, "_transport", httpx.MockTransport(handler))
+    llm_client._post_stream([{"role": "user", "content": "hi"}], fmt="json")
+    assert captured["options"]["num_ctx"] == config.OLLAMA_NUM_CTX
