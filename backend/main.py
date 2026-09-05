@@ -20,6 +20,8 @@ from backend.api import checkout as checkout_routes
 from backend.api import debug as debug_routes
 from backend.api import intents as intent_routes
 from backend.api import state as state_routes
+from backend.api import ui as ui_routes
+from backend.api import ui_data as ui_data_routes
 from backend.api import webhooks as webhook_routes
 from backend.models import db as database
 
@@ -103,6 +105,8 @@ app.include_router(intent_routes.router)
 app.include_router(chat_routes.router)
 app.include_router(checkout_routes.router)
 app.include_router(webhook_routes.router)
+app.include_router(ui_data_routes.router)
+app.include_router(ui_routes.router)
 app.include_router(debug_routes.router)
 
 
