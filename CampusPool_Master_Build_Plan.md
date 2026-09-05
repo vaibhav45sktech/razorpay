@@ -460,6 +460,7 @@ Deliberately thin, deliberately last. Every screen points at an API that already
 4. **No client-side math.** Every number rendered comes verbatim from an API response. Enforce it on yourself in review.
 5. 🛡️ Every synthetic data point is visibly labelled as demo content in the UI. *(PRD §8.2.)*
 6. **The stranger test**: someone who hasn't seen the project uses it start to finish — saving, a denied over-limit purchase, an approval prompt, an approval — with zero narration from you.
+7. **Autopilot (added 2026-09-05, see D6.1).** The chat panel is not the product; the agent leading is. Main screen = three tabs driven by `services/autopilot_service.py` (deterministic code over the ledger, no model in the loop): **Plan** (this month's proposed contribution + reasons, one button: Agree & pay → intent → Razorpay test checkout), **Pool** (10-round timeline, a needs form, the agent's draw-round recommendation with reasons, Request this round → `PoolAllocation`, DEBUG-only simulated payout through the real policy gate), **Spend** (offers matched to stated needs, each with a policy preview; tap → PURCHASE intent → existing approval/checkout cards). Chat becomes a side drawer with a read-only `get_autopilot_plan` tool so it explains the same plan the screen shows. Routes in `api/autopilot.py`; tests in `tests/test_autopilot.py`.
 
 **Commit & tag:** `v0.6-frontend`.
 
@@ -648,6 +649,16 @@ reasoning survives, and so nobody relitigates them by accident.
 ### D2.3 — Reconciliation exception window *(placeholder, Phase 5 Step 8)*
 
 `RECONCILE_STUCK_AFTER_SECONDS=120` (ask Razorpay after 2 minutes in EXECUTING) and `RECONCILE_EXCEPTION_AFTER_SECONDS=900` (UNKNOWN → EXCEPTION after 15 minutes with no decisive status). The 15 minutes is the plan's `# TODO: confirm with product owner` filled with a placeholder so the sweeper is runnable; the owner can change it in `.env` without a code change.
+
+### D6.1 — Autopilot: the agent leads, the user agrees *(resolved 2026-09-05, Phase 6)*
+
+**Problem:** with the chat as the main screen, the app read as "a chatbot with a balance panel"; the investment → saving → spending loop the product is about had to be typed in by the user every time.
+
+**Chosen (four locked decisions):** (1) **one tap a month** — the Autopilot proposes the contribution (goal shortfall, capped to the ₹100–₹500 band and the cycle's ₹500), the user taps *Agree & pay*; a second tap reuses the pending intent, a covered month returns 409. (2) **Simple needs form** (what / month / amount / category) — plain user data, never inferred by the model. (3) **Simulated payout** for the pool draw — the existing policy-gated `TEST_PAYOUT` path, DEBUG-only, evidence marked `simulated`, settled into the rewards bucket; refused by the policy engine unless a `CONFIRMED` allocation authorises it. (4) **Chat as a side drawer** — kept for explanations and free-form requests; given `get_autopilot_plan` (read-only) so it explains the screen's plan rather than inventing one.
+
+**Recommendation rule (deterministic, testable):** projected savings in month *m* = saved now + proposed monthly × months ahead; walk needs in month order accumulating amounts; the first month where cumulative needs exceed projected savings is the shortfall; recommend the latest open round on/before it, else the last round (keeps the streak and the consistency reward). Every reason is a plain sentence and is written verbatim into the allocation's `reason`, which is what the policy engine later shows when authorising the payout.
+
+**Not chosen — letting the model set amounts or rounds:** it would reopen Phase 4's amount-provenance problem for the one flow that must be boring. The model reads the plan; only the user's tap and deterministic code write it.
 
 # Part E — Pin this next to your screen
 
