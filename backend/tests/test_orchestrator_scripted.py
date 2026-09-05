@@ -897,3 +897,67 @@ def test_time_budget_exhaustion_says_time_not_steps(db, aarav, monkeypatch) -> N
     _script_decide(monkeypatch, [_final("never reached")])
     reply = orchestrator.run_agent_turn(db, aarav.id, "hi")
     assert reply.exhausted and "longer than I'm allowed" in reply.text
+
+
+# ---------------------------------------------------------------------------
+# Guardrail 5 — write provenance (2026-09-05, Phase 5 live run: a balance
+# question caused update_goal(pause)).
+# ---------------------------------------------------------------------------
+
+
+def _goal_id(db, user_id: str) -> str:
+    from backend.models.entities import Goal
+    return db.execute(select(Goal.id).where(Goal.user_id == user_id)).scalars().first()
+
+
+def test_unrequested_goal_pause_is_blocked_and_goal_untouched(db, aarav, monkeypatch) -> None:
+    from backend.models.entities import Goal, GoalStatus
+
+    gid = _goal_id(db, aarav.id)
+    _script_decide(monkeypatch, [_call("update_goal"), _final("Your emergency savings are ₹1,500.")])
+    _script_fill_arguments(monkeypatch, [{"goal_id": gid, "event": "pause"}])
+
+    orchestrator.run_agent_turn(db, aarav.id, "What's my emergency savings balance now?")
+    db.commit()
+
+    actions = _audit_actions(db, aarav.id)
+    assert "blocked_unrequested_write:update_goal" in actions
+    assert "tool:update_goal" not in actions
+    assert db.get(Goal, gid).status is GoalStatus.ACTIVE
+    row = db.execute(select(AuditEvent).where(AuditEvent.action == "blocked_unrequested_write:update_goal")).scalars().one()
+    assert row.policy_result["rule"] == "change_not_requested_by_user"
+
+
+def test_requested_goal_pause_and_resume_go_through(db, aarav, monkeypatch) -> None:
+    from backend.models.entities import Goal, GoalStatus
+
+    gid = _goal_id(db, aarav.id)
+    _script_decide(monkeypatch, [_call("update_goal"), _final("Paused.")])
+    _script_fill_arguments(monkeypatch, [{"goal_id": gid, "event": "pause"}])
+    orchestrator.run_agent_turn(db, aarav.id, "Please pause my emergency cushion goal for now")
+    assert db.get(Goal, gid).status is GoalStatus.PAUSED
+
+    _script_decide(monkeypatch, [_call("update_goal"), _final("Resumed.")])
+    _script_fill_arguments(monkeypatch, [{"goal_id": gid, "event": "resume"}])
+    orchestrator.run_agent_turn(db, aarav.id, "ok, resume it again")
+    assert db.get(Goal, gid).status is GoalStatus.ACTIVE
+    assert "blocked_unrequested_write:update_goal" not in _audit_actions(db, aarav.id)
+
+
+def test_write_provenance_reads_history_too(db, aarav, monkeypatch) -> None:
+    from backend.models.entities import Goal, GoalStatus
+
+    gid = _goal_id(db, aarav.id)
+    _script_decide(monkeypatch, [_call("update_goal"), _final("Done.")])
+    _script_fill_arguments(monkeypatch, [{"goal_id": gid, "event": "pause"}])
+    history = [{"role": "user", "content": "I want to pause my savings goal"},
+               {"role": "assistant", "content": "Sure - shall I pause 'Emergency cushion'?"}]
+    orchestrator.run_agent_turn(db, aarav.id, "yes", history)
+    assert db.get(Goal, gid).status is GoalStatus.PAUSED
+
+
+def test_execute_tool_default_blocks_writes_without_user_text(db, aarav) -> None:
+    gid = _goal_id(db, aarav.id)
+    tool = tool_registry.get("update_goal")
+    out = orchestrator.execute_tool(db, aarav.id, tool, {"goal_id": gid, "event": "resume"})
+    assert out["blocked"] is True and out["decision"] == "BLOCKED"

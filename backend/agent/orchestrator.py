@@ -66,6 +66,19 @@ TURN_BUDGET_SECONDS = 75.0
 #: Tools that require the independent policy re-check before they may run.
 MONEY_TOOLS: frozenset[str] = frozenset({"create_payment_intent"})
 
+#: Non-money WRITE tools, and the words a user must have used for each
+#: argument value before the model may call them (Guardrail 5 - write
+#: provenance). 2026-09-05, Phase 5 live run: asked "What's my emergency
+#: savings balance now?", qwen2.5:7b-instruct called update_goal(pause) and
+#: paused the user's goal. Not money, so Guardrails 1-4 did not apply; the
+#: transcript is still the only evidence of what the user asked for.
+WRITE_TOOL_REQUESTS: dict[str, dict[str, tuple[str, ...]]] = {
+    "update_goal": {
+        "pause": ("pause", "hold", "stop", "freeze", "suspend"),
+        "resume": ("resume", "restart", "continue", "unpause", "reactivate", "un-pause", "start again"),
+    },
+}
+
 #: Tools that carry a user-proposed amount and therefore get the amount-
 #: provenance check (Guardrail 3). check_policy is read-only, but letting the
 #: model probe amounts the user never said is how "you can contribute ₹500!"
@@ -209,6 +222,7 @@ def run_agent_turn(
 
     started = time.monotonic()
     stated = stated_amounts_paise(messages)
+    said = user_text(messages)
     #: (tool name, canonical args) -> result already returned this turn.
     calls_seen: dict[tuple[str, str], dict[str, Any]] = {}
     corrected_parrot = False
@@ -325,7 +339,7 @@ def run_agent_turn(
                 else:
                     result = execute_tool(
                         session, user_id, tool, raw_args, stated_amounts=stated,
-                        money_locked_reason=money_locked_reason,
+                        money_locked_reason=money_locked_reason, user_said=said,
                     )
                     calls_seen[key] = result
                     if result.get("error") == "invalid_arguments":
@@ -367,6 +381,12 @@ def run_agent_turn(
     return _exhausted_reply(MAX_STEPS, state, reason="step_budget_exhausted")
 
 
+def user_text(messages: list[dict[str, Any]]) -> str:
+    """Everything the USER typed this conversation, lower-cased, for the
+    write-provenance check. Never the model's own text or tool results."""
+    return " ".join(str(m.get("content", "")) for m in messages if m.get("role") == "user").lower()
+
+
 def execute_tool(
     session: Session,
     user_id: str,
@@ -375,6 +395,7 @@ def execute_tool(
     *,
     stated_amounts: frozenset[int] = frozenset(),
     money_locked_reason: str | None = None,
+    user_said: str = "",
 ) -> dict[str, Any]:
     """Run one LLM-requested tool for real. Every call here — including
     refused and blocked ones — lands in the audit log.
@@ -442,6 +463,31 @@ def execute_tool(
                 "at all: answer the user's actual question (see user_question) with the facts you have."
             ),
         }
+
+    if tool.name in WRITE_TOOL_REQUESTS:
+        # Guardrail 5 - write provenance: a non-money write happens only if
+        # the user literally asked for that change. Default (no user text
+        # passed) is to block: too strict, never permissive.
+        wanted = getattr(parsed, "event", None)
+        verbs = WRITE_TOOL_REQUESTS[tool.name].get(str(wanted), ())
+        if not any(v in user_said for v in verbs):
+            verdict = {
+                "decision": "BLOCKED",
+                "rule": "change_not_requested_by_user",
+                "reason": (
+                    f"The user did not ask to {wanted} anything in this conversation. The agent may not "
+                    "change the user's goals or settings on its own initiative."
+                ),
+                "details": {"tool": tool.name, "event": wanted, "expected_one_of": list(verbs)},
+            }
+            audit_service.write(
+                session, actor=AuditActor.LLM, action=f"blocked_unrequested_write:{tool.name}", user_id=user_id,
+                inputs=raw_args, policy_result=verdict,
+            )
+            return {
+                "blocked": True, "decision": "BLOCKED", "reason": verdict["reason"],
+                "hint": "Only call this tool when the user explicitly asks for that change. Answer the user's actual question.",
+            }
 
     if tool.name in AMOUNT_TOOLS:
         amount_paise = getattr(parsed, "amount_paise")
