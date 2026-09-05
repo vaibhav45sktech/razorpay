@@ -125,8 +125,8 @@
     m.position.set(...b.p); group.add(m); items.push({ m, phase: i * 1.3, amp: .08 });
   });
   group.rotation.set(0.30, -0.52, 0.04);
-  group.position.set(-0.75, 0.15, 0);
-  group.scale.setScalar(0.8);
+  group.position.set(-0.45, 0.15, 0);
+  group.scale.setScalar(0.76);
 
   // soft ground shadow catcher
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.ShadowMaterial({ opacity: .35 }));
