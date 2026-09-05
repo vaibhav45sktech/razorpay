@@ -20,8 +20,8 @@
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
-  camera.position.set(0, 1.4, 11.5);
-  camera.lookAt(0, 0, 0);
+  camera.position.set(0, 1.2, 16);
+  camera.lookAt(0, -0.2, 0);
 
   // ---- environment: a soft studio built from gradients, so metals & glass have something to reflect
   function gradientFace(top, bottom, streak) {
@@ -57,22 +57,36 @@
     shape.lineTo(x + r, y + h); shape.quadraticCurveTo(x, y + h, x, y + h - r);
     shape.lineTo(x, y + r); shape.quadraticCurveTo(x, y, x + r, y);
     const geo = new THREE.ExtrudeGeometry(shape, { depth: d - 2 * r, bevelEnabled: true, bevelThickness: r, bevelSize: r, bevelSegments: seg, curveSegments: 10 });
-    geo.center(); return geo;
+    geo.center();
+    // ExtrudeGeometry's UVs are in shape units. Remap the FRONT/BACK faces
+    // (material group 0) so one label texture spans the face exactly; the
+    // sides (group 1) get a plain material, so their UVs don't matter.
+    const uv = geo.attributes.uv, pos = geo.attributes.position;
+    const g0 = geo.groups.find((g) => g.materialIndex === 0);
+    if (g0) {
+      const idx = geo.index; const seen = new Set();
+      for (let i = g0.start; i < g0.start + g0.count; i++) {
+        const v = idx ? idx.getX(i) : i; if (seen.has(v)) continue; seen.add(v);
+        uv.setXY(v, pos.getX(v) / w + .5, pos.getY(v) / h + .5);
+      }
+      uv.needsUpdate = true;
+    }
+    return geo;
   }
 
   // ---- label textures (drawn on canvas; text is ours)
-  function labelTexture(text, { fg = "#111", bg = "#f4f4f2", speckle = null, font = "600 92px Inter, system-ui, sans-serif", align = "left" } = {}) {
+  function labelTexture(text, { fg = "#111", bg = "#f4f4f2", speckle = null, font = "600 150px Inter, system-ui, sans-serif", align = "left" } = {}) {
     const c = document.createElement("canvas"); c.width = 1024; c.height = 1024; const g = c.getContext("2d");
     g.fillStyle = bg; g.fillRect(0, 0, 1024, 1024);
     if (speckle) { g.fillStyle = speckle; for (let i = 0; i < 1400; i++) { g.globalAlpha = Math.random() * .5; g.fillRect(Math.random() * 1024, Math.random() * 1024, 2 + Math.random() * 3, 2 + Math.random() * 3); } g.globalAlpha = 1; }
     g.fillStyle = fg; g.font = font; g.textBaseline = "top"; g.textAlign = align;
-    g.fillText(text, align === "left" ? 80 : 512, 96);
+    g.fillText(text, align === "left" ? 90 : 512, 110);
     const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; t.anisotropy = 8; return t;
   }
 
   // ---- the blocks: label, size, position, finish
   const B = [
-    { t: "Savings", s: [2.2, 2.2, 2.2], p: [-2.9, 0.75, -0.4], fin: "satin", bg: "#efece3", fg: "#141414", font: "italic 400 110px 'Iowan Old Style', Georgia, serif" },
+    { t: "Savings", s: [2.2, 2.2, 2.2], p: [-2.9, 0.75, -0.4], fin: "satin", bg: "#efece3", fg: "#141414", font: "italic 400 170px 'Iowan Old Style', Georgia, serif" },
     { t: "Pool", s: [1.9, 1.1, 1.9], p: [-0.35, 1.35, 0.3], fin: "glass", bg: "#1f8fff", fg: "#ffffff", speckle: "#0b3d91" },
     { t: "Rules", s: [1.9, 1.0, 1.9], p: [-0.35, 0.15, 0.3], fin: "glass", bg: "#1f8fff", fg: "#ffffff", speckle: "#0b3d91" },
     { t: "Agent", s: [2.1, 2.2, 2.1], p: [1.75, 0.75, -0.5], fin: "satin", bg: "#ffffff", fg: "#141414" },
@@ -82,14 +96,17 @@
     { t: "Razorpay", s: [2.1, 1.9, 2.1], p: [1.45, -1.9, -0.2], fin: "chrome", bg: "#9aa0a6", fg: "#ffffff" },
   ];
   function material(b) {
-    const map = labelTexture(b.t, { fg: b.fg, bg: b.bg, speckle: b.speckle || null, font: b.font || "600 96px Inter, system-ui, sans-serif" });
-    const common = { map, envMapIntensity: 1.1 };
+    const map = labelTexture(b.t, { fg: b.fg, bg: b.bg, speckle: b.speckle || null, font: b.font || "600 150px Inter, system-ui, sans-serif" });
+    map.wrapS = map.wrapT = THREE.ClampToEdgeWrapping;
+    const side = { color: new THREE.Color(b.bg), envMapIntensity: 1.1 };
+    const front = { map, envMapIntensity: 1.1 };
+    const make = (extra) => [new THREE.MeshPhysicalMaterial({ ...front, ...extra }), new THREE.MeshPhysicalMaterial({ ...side, ...extra })];
     switch (b.fin) {
-      case "glass": return new THREE.MeshPhysicalMaterial({ ...common, roughness: .12, metalness: 0, transmission: .35, thickness: 1.2, clearcoat: 1, clearcoatRoughness: .08, ior: 1.4 });
-      case "gloss": return new THREE.MeshPhysicalMaterial({ ...common, roughness: .08, metalness: .05, clearcoat: 1, clearcoatRoughness: .05 });
-      case "chrome": return new THREE.MeshStandardMaterial({ ...common, roughness: .18, metalness: .85 });
-      case "speckled": return new THREE.MeshPhysicalMaterial({ ...common, roughness: .35, metalness: .05, clearcoat: .6, clearcoatRoughness: .3 });
-      default: return new THREE.MeshPhysicalMaterial({ ...common, roughness: .42, metalness: 0, clearcoat: .35, clearcoatRoughness: .4 });
+      case "glass": return make({ roughness: .12, metalness: 0, transmission: .3, thickness: 1.2, clearcoat: 1, clearcoatRoughness: .08, ior: 1.4 });
+      case "gloss": return make({ roughness: .08, metalness: .05, clearcoat: 1, clearcoatRoughness: .05 });
+      case "chrome": return make({ roughness: .2, metalness: .85 });
+      case "speckled": return make({ roughness: .35, metalness: .05, clearcoat: .6, clearcoatRoughness: .3 });
+      default: return make({ roughness: .42, metalness: 0, clearcoat: .35, clearcoatRoughness: .4 });
     }
   }
   const group = new THREE.Group(); scene.add(group);
@@ -107,8 +124,9 @@
     const m = new THREE.Mesh(roundedBox(...b.s, .18), mat); m.castShadow = m.receiveShadow = true;
     m.position.set(...b.p); group.add(m); items.push({ m, phase: i * 1.3, amp: .08 });
   });
-  group.rotation.set(0.32, -0.55, 0.04);
-  group.position.set(0.2, 0.1, 0);
+  group.rotation.set(0.30, -0.52, 0.04);
+  group.position.set(-0.2, 0.15, 0);
+  group.scale.setScalar(0.86);
 
   // soft ground shadow catcher
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.ShadowMaterial({ opacity: .35 }));
@@ -135,8 +153,8 @@
     const t = (now - start) / 1000;
     if (!reduce) {
       px += (tx - px) * .04; py += (ty - py) * .04;
-      group.rotation.y = -0.55 + Math.sin(t * .18) * .22 + px;
-      group.rotation.x = 0.32 + Math.sin(t * .13) * .06 + py;
+      group.rotation.y = -0.52 + Math.sin(t * .18) * .2 + px;
+      group.rotation.x = 0.30 + Math.sin(t * .13) * .05 + py;
       items.forEach(({ m, phase, amp }) => { m.position.y += Math.sin(t * 1.1 + phase) * amp * .02; m.rotation.z = Math.sin(t * .6 + phase) * .01; });
     }
     renderer.render(scene, camera);
