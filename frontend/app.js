@@ -75,7 +75,7 @@
     });
 
     renderPending(s.pending_actions || []);
-    renderDonut(b);
+    renderDonut(b, sp);
   }
 
   function renderPending(list) {
@@ -138,12 +138,13 @@
   const DONUT_SERIES = [
     { key: "emergency_savings", label: "Emergency savings", note: "protected · never spendable by the agent", color: "#17b26a" },
     { key: "rewards", label: "Rewards", note: "partner-funded · promotions, not advice", color: "#0e7a4c" },
-    { key: "discretionary", label: "Discretionary (net)", note: "spend tracker · counts against your monthly limit", color: "#9fd7bd" },
+    { key: "spent_this_month", label: "Spent this month", note: "discretionary is a spend tracker, not a balance (decision D2.1)", color: "#9fd7bd" },
   ];
-  function renderDonut(balances) {
+  function renderDonut(balances, spending) {
     const segs = $("#donutSegs"); segs.innerHTML = "";
     const legend = $("#legend"); legend.innerHTML = "";
-    const vals = DONUT_SERIES.map((s) => Math.max(0, balances[s.key] || 0));
+    const figures = { ...balances, spent_this_month: spending ? spending.used_paise : null };
+    const vals = DONUT_SERIES.map((s) => Math.max(0, figures[s.key] || 0));
     const total = vals.reduce((a, b) => a + b, 0);
     const C = 2 * Math.PI * 78; let offset = 0;
     DONUT_SERIES.forEach((s, i) => {
@@ -153,7 +154,7 @@
       c.setAttribute("stroke", s.color); c.setAttribute("stroke-dasharray", `${frac * C} ${C}`); c.setAttribute("stroke-dashoffset", String(-offset));
       segs.appendChild(c); offset += frac * C;
       const li = document.createElement("li");
-      li.innerHTML = `<span class="sw" style="background:${s.color}"></span><span>${s.label}<small>${s.note}</small></span><span class="v">${rupees(balances[s.key])}</span>`;
+      li.innerHTML = `<span class="sw" style="background:${s.color}"></span><span>${s.label}<small>${s.note}</small></span><span class="v">${rupees(figures[s.key])}</span>`;
       legend.appendChild(li);
     });
     // Centre figure: an API value verbatim (plan Phase 6 item 4 - no client-side
