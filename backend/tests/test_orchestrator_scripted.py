@@ -961,3 +961,33 @@ def test_execute_tool_default_blocks_writes_without_user_text(db, aarav) -> None
     tool = tool_registry.get("update_goal")
     out = orchestrator.execute_tool(db, aarav.id, tool, {"goal_id": gid, "event": "resume"})
     assert out["blocked"] is True and out["decision"] == "BLOCKED"
+
+
+# ---------------------------------------------------------------------------
+# Handler refusals are tool results, not 500s; paused goals stay visible
+# (2026-09-05, Phase 5 live run).
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_goal_id_is_a_tool_error_not_a_crash(db, aarav, monkeypatch) -> None:
+    _script_decide(monkeypatch, [_call("update_goal"), _final("I couldn't find that goal.")])
+    _script_fill_arguments(monkeypatch, [{"goal_id": "gol_does_not_exist", "event": "resume"}])
+    reply = orchestrator.run_agent_turn(db, aarav.id, "please resume my goal")
+    db.commit()
+    assert reply.text == "I couldn't find that goal."
+    actions = _audit_actions(db, aarav.id)
+    assert "tool_error:update_goal" in actions and "tool:update_goal" not in actions
+
+
+def test_paused_goal_remains_visible_in_state_with_its_status(db, aarav) -> None:
+    from backend.models.entities import Goal, GoalStatus
+    from backend.services import state_service
+
+    gid = _goal_id(db, aarav.id)
+    db.get(Goal, gid).status = GoalStatus.PAUSED
+    db.flush()
+    state = state_service.get_state(db, aarav.id)
+    mine = [g for g in state["goals"] if g["goal_id"] == gid]
+    assert mine and mine[0]["status"] == "paused"
+    from backend.agent import prompts
+    assert "PAUSED" in prompts.render_state_summary(state) and gid in prompts.render_state_summary(state)

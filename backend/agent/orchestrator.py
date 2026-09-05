@@ -554,7 +554,27 @@ def execute_tool(
             )
             return {"blocked": True, "decision": allow.decision.value, "reason": allow.reason}
 
-    output = tool.handler(session, user_id, parsed)
+    try:
+        output = tool.handler(session, user_id, parsed)
+    except (LookupError, PermissionError, ValueError) as exc:
+        # A handler refusing its input (unknown/foreign goal id, unsupported
+        # value) is a normal tool outcome the model must see and recover
+        # from - not a 500. 2026-09-05: the model invented a goal id for a
+        # goal that state had hidden (paused), LookupError went uncaught,
+        # and the whole chat turn failed. Anything else (a real bug) still
+        # propagates: chat.py rolls back and the traceback is visible.
+        audit_service.write(
+            session, actor=AuditActor.LLM, action=f"tool_error:{tool.name}", user_id=user_id, inputs=raw_args,
+            policy_result={"error": type(exc).__name__, "detail": str(exc)[:200]},
+        )
+        return {
+            "error": "tool_failed",
+            "detail": f"{type(exc).__name__}: {str(exc)[:200]}",
+            "fix": (
+                "Use only ids that appear in the state snapshot or in an earlier tool result this turn. "
+                "If you don't have the right id, tell the user what you found instead of guessing."
+            ),
+        }
     result = output.model_dump() if isinstance(output, BaseModel) else output
 
     audit_service.write(

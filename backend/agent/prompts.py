@@ -197,9 +197,10 @@ def render_state_summary(state: dict) -> str:
 
     goals = state.get("goals") or []
     for g in goals[:3]:
+        paused = " - PAUSED" if g.get("status") == "paused" else ""
         lines.append(
-            f"Goal '{g.get('label')}': {_rupees(g.get('current_paise'))} of {_rupees(g.get('target_paise'))} "
-            f"({g.get('pct_complete')}% complete)"
+            f"Goal '{g.get('label')}' (id {g.get('goal_id')}): {_rupees(g.get('current_paise'))} of "
+            f"{_rupees(g.get('target_paise'))} ({g.get('pct_complete')}% complete){paused}"
         )
 
     pending = state.get("pending_actions") or []
